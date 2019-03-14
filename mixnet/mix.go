@@ -10,7 +10,7 @@ type Mix struct {
 
 func (m *Mix) Run() error {
 
-    fmt.Printf("Mix.Name: '%s'\nMix.PKey: '%s'\nMix.SKey: '%s'\n", m.Name, m.PKey, m.SKey)
+    fmt.Printf("Mix.Name: '%s'\nMix.PKey: '%x'\nMix.SKey: '%x'\n", m.Name, *m.PKey, *m.SKey)
 
     return nil
 }

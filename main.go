@@ -17,12 +17,19 @@ func main() {
 	isClientFlag := flag.Bool("client", false, "Append this flag on a node representing a client of the mix-net.")
 	isMixFlag := flag.Bool("mix", false, "Append this flag on a node taking up mix responsibilities.")
 	pkiAddrFlag := flag.String("pki", "127.0.0.1:10001", "Provide IP:port address string of PKI for mix-net.")
+	nameFlag := flag.String("name", "", "Specify human-readable name of this node.")
 	listenAddrFlag := flag.String("listenAddr", "", "Specify on which IP:port for this node to listen for messages.")
 	flag.Parse()
 
 	// Enforce either client or mix designation.
 	if *isClientFlag == *isMixFlag {
 		fmt.Printf("Please identify node as either '-client' or '-mix'.\n")
+		os.Exit(1)
+	}
+
+	// Expect a name set for the node.
+	if *nameFlag == "" {
+		fmt.Printf("Please specify a human-readable name for the node.\n")
 		os.Exit(1)
 	}
 
@@ -35,9 +42,10 @@ func main() {
 	isClient := *isClientFlag
 	isMix := *isMixFlag
 	pkiAddr := *pkiAddrFlag
+	name := *nameFlag
 	listenAddr := *listenAddrFlag
 
-	fmt.Printf("Params:  isClient='%v'  &&  isMix='%v'  &&  pkiAddr='%v'  &&  listenAddr='%v'\n", isClient, isMix, pkiAddr, listenAddr)
+	fmt.Printf("Params:  isClient='%v'  &&  isMix='%v'  &&  pkiAddr='%v'  &&  listenAddr='%v'\n\n", isClient, isMix, pkiAddr, listenAddr)
 
 	// Generate a public-private key pair.
 	// We are using NaCl which uses Curve25519.
@@ -47,14 +55,35 @@ func main() {
 		os.Exit(1)
 	}
 
-	mix := &mixnet.Mix{
-		&mixnet.Node{
-			Name: "lol",
-			PKey: pKey,
-			SKey: sKey,
-		},
+	// Construct common node characteristics.
+	node := &mixnet.Node{
+		Name: name,
+		PKey: pKey,
+		SKey: sKey,
 	}
 
-	// Hand-over to endless loop method of respective service.
-	mix.Run()
+	if isMix {
+
+		mix := &mixnet.Mix{
+			node,
+		}
+
+		// Run endless loop of mix node.
+		err = mix.Run()
+
+	} else if isClient {
+
+		client := &mixnet.Client{
+			node,
+		}
+
+		err = client.Run()
+	}
+
+	if err != nil {
+		fmt.Printf("Failed to run node: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("\nAll shut down, exiting.\n")
 }
