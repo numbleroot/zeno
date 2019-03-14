@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net"
 	"os"
 
 	"crypto/rand"
@@ -64,8 +65,17 @@ func main() {
 
 	if isMix {
 
+		// Start listening on TCP socket.
+		l, err := net.Listen("tcp", listenAddr)
+		if err != nil {
+			fmt.Printf("Failed to listen on listenAddr: %v\n", err)
+			os.Exit(1)
+		}
+		defer l.Close()
+
 		mix := &mixnet.Mix{
-			node,
+			Node:     node,
+			Listener: l,
 		}
 
 		// Run endless loop of mix node.

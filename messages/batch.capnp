@@ -6,3 +6,7 @@ $Go.import("github.com/numbleroot/zeno/messages");
 struct Batch {
     comment @0 :Text;
 }
+
+interface Mix {
+    acceptBatch @0 (batch :Batch) -> (ack :Text);
+}
