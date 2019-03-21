@@ -11,7 +11,12 @@ struct ConvoMsg {
     content @0 :Data;
 }
 
-interface EntryMix {
+struct Batch {
+    msgs @0 :List(Data);
+}
+
+interface Mix {
     getMixnetConfig @0 () -> (meta :MixnetConfig);
     addConvoMsg @1 (msg :ConvoMsg) -> (status :UInt8);
+    addBatch @2 (batch :Batch) -> (status :UInt8);
 }
