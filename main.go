@@ -96,16 +96,19 @@ func main() {
 		ChainMatrixConfigured: make(chan struct{}),
 	}
 
-	if isMix {
+	// Open up socket for eventual chain matrix
+	// election data from PKI.
+	node.PKIListener, err = net.Listen("tcp", pkiLisAddr)
+	if err != nil {
+		fmt.Printf("Failed to listen for PKI information on socket %s: %v\n", pkiLisAddr, err)
+		os.Exit(1)
+	}
+	defer node.PKIListener.Close()
 
-		// Open up socket for eventual chain matrix
-		// election data from PKI.
-		node.PKIListener, err = net.Listen("tcp", pkiLisAddr)
-		if err != nil {
-			fmt.Printf("Failed to listen for PKI information on socket %s: %v\n", pkiLisAddr, err)
-			os.Exit(1)
-		}
-		defer node.PKIListener.Close()
+	// Handle messages from PKI.
+	go node.HandlePKIMsgs()
+
+	if isMix {
 
 		// Nodes that offer to take up a mix role
 		// register their intent with the PKI.
@@ -115,16 +118,13 @@ func main() {
 			os.Exit(1)
 		}
 
-		// Handle messages from PKI.
-		go node.HandlePKIMsgs()
-
 		// Wait until chainMatrix has been built.
 		<-node.ChainMatrixConfigured
 
 		// Determine whether this node is an entry
 		// or a common mix node.
 
-		mix := &mixnet.EntryMix{
+		mix := &mixnet.Mix{
 			Node: node,
 		}
 
@@ -150,19 +150,20 @@ func main() {
 
 	} else if isClient {
 
-		// TODO: Clients register with their publicly
-		//       reachable address and public key for
-		//       receiving messages at the PKI.
-		//       As response, they receive the last stable
-		//       list of nodes that are participating in
-		//       cascades election.
+		// Nodes that are regular clients in the
+		// system register with their address and
+		// receive public key at the PKI.
+		err = node.RegisterClient()
+		if err != nil {
+			fmt.Printf("Failed to register as client at PKI server: %v\n", err)
+			os.Exit(1)
+		}
 
-		// TODO: Clients run the deterministic, offline
-		//       sequence computation for all cascades
-		//       in the system. Output is the chain matrix.
+		// Wait until chainMatrix has been built.
+		<-node.ChainMatrixConfigured
 
 		client := &mixnet.Client{
-			node,
+			Node: node,
 		}
 
 		err := client.Run()

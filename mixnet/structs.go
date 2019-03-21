@@ -28,12 +28,8 @@ type Client struct {
 	*Node
 }
 
-type EntryMix struct {
+type Mix struct {
 	*Node
 	PubListener net.Listener
-}
-
-type CommonMix struct {
-	*Node
-	PubListener net.Listener
+	IsEntry     bool
 }

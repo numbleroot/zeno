@@ -9,7 +9,7 @@ import (
 	capnprpc "zombiezen.com/go/capnproto2/rpc"
 )
 
-// Run provides the main  execution
+// Run provides the main execution
 // logic of a client.
 func (cl *Client) Run() error {
 
@@ -23,11 +23,11 @@ func (cl *Client) Run() error {
 	conn := capnprpc.NewConn(capnprpc.StreamTransport(c))
 	defer conn.Close()
 
-	entry := rpc.EntryMix{
+	entry := rpc.Mix{
 		Client: conn.Bootstrap(ctx),
 	}
 
-	status, err := entry.AddConvoMsg(ctx, func(p rpc.EntryMix_addConvoMsg_Params) error {
+	status, err := entry.AddConvoMsg(ctx, func(p rpc.Mix_addConvoMsg_Params) error {
 
 		msg, err := p.NewMsg()
 		if err != nil {
