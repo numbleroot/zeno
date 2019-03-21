@@ -4,18 +4,14 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/numbleroot/zeno/messages"
+	"github.com/numbleroot/zeno/rpc"
 	"golang.org/x/net/context"
-	"zombiezen.com/go/capnproto2/rpc"
+	capnprpc "zombiezen.com/go/capnproto2/rpc"
 )
 
-type Client struct {
-	*Node
-}
-
+// Run provides the main  execution
+// logic of a client.
 func (cl *Client) Run() error {
-
-	fmt.Printf("Client.Name: '%s'\nClient.PKey: '%x'\nClient.SKey: '%x'\n", cl.Name, *cl.PKey, *cl.SKey)
 
 	ctx := context.Background()
 
@@ -24,32 +20,30 @@ func (cl *Client) Run() error {
 		return err
 	}
 
-	conn := rpc.NewConn(rpc.StreamTransport(c))
+	conn := capnprpc.NewConn(capnprpc.StreamTransport(c))
 	defer conn.Close()
 
-	sender := messages.Mix{
+	entry := rpc.EntryMix{
 		Client: conn.Bootstrap(ctx),
 	}
 
-	call := sender.AcceptBatch(ctx, func(p messages.Mix_acceptBatch_Params) error {
+	status, err := entry.AddConvoMsg(ctx, func(p rpc.EntryMix_addConvoMsg_Params) error {
 
-		batch, err := p.NewBatch()
+		msg, err := p.NewMsg()
 		if err != nil {
 			return err
 		}
 
-		batch.SetComment("This is a first try!")
+		msg.SetContent([]byte("test payload!"))
 
 		return nil
 
-	})
-
-	ack, err := call.Struct()
+	}).Struct()
 	if err != nil {
 		return err
 	}
 
-	fmt.Printf("\nReceived acknowledgement: '%#v'\n", ack)
+	fmt.Printf("\nReceived status reply: '%#v'\n", status)
 
 	return nil
 }
