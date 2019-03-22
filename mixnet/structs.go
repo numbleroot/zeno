@@ -3,6 +3,8 @@ package mixnet
 import (
 	"crypto/tls"
 	"net"
+
+	"github.com/numbleroot/zeno/rpc"
 )
 
 type Endpoint struct {
@@ -26,6 +28,7 @@ type Node struct {
 // for running a client.
 type Client struct {
 	*Node
+	EntryConns []*rpc.Mix
 }
 
 type Mix struct {

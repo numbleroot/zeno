@@ -159,14 +159,25 @@ func main() {
 			os.Exit(1)
 		}
 
+		fmt.Printf("Waiting for chain matrix to configure...")
+
 		// Wait until chainMatrix has been built.
 		<-node.ChainMatrixConfigured
+
+		fmt.Printf(" received!\n")
 
 		client := &mixnet.Client{
 			Node: node,
 		}
 
-		err := client.Run()
+		// Connect to all entry mixes in chainMatrix.
+		err := client.ReconnectToEntries()
+		if err != nil {
+			fmt.Printf("Error while connecting to entry mixes: %v\n", err)
+		}
+
+		// Handle messaging loop.
+		err = client.HandleMsgs()
 		if err != nil {
 			fmt.Printf("Error while running client: %v\n", err)
 		}

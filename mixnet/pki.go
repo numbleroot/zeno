@@ -89,6 +89,10 @@ func (node *Node) RegisterClient() error {
 
 func (node *Node) ConfigureChainMatrix(connRead *bufio.Reader, connWrite net.Conn) error {
 
+	fmt.Printf("Candidates broadcast received!\n")
+
+	fmt.Fprintf(connWrite, "0\n")
+
 	// TODO: Parse list of addresses and public keys
 	//       received from PKI into candidates slice.
 
@@ -103,6 +107,7 @@ func (node *Node) ConfigureChainMatrix(connRead *bufio.Reader, connWrite net.Con
 	//       entry mix or a common one.
 
 	// TODO: Signal channel node.ChainMatrixConfigured.
+	node.ChainMatrixConfigured <- struct{}{}
 
 	return nil
 }
