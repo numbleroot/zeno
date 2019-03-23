@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/numbleroot/zeno/mixnet"
 	"golang.org/x/crypto/nacl/box"
@@ -84,6 +85,7 @@ func main() {
 
 	// Construct common node characteristics.
 	node := &mixnet.Node{
+		ShutDown:   make(chan struct{}),
 		RecvPubKey: recvPubKey,
 		RecvSecKey: recvSecKey,
 		PKIAddr:    pkiAddr,
@@ -167,7 +169,8 @@ func main() {
 		fmt.Printf(" received!\n")
 
 		client := &mixnet.Client{
-			Node: node,
+			Node:   node,
+			SendWG: &sync.WaitGroup{},
 		}
 
 		// Connect to all entry mixes in chainMatrix.

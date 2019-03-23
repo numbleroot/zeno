@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net"
 
+	capnp "zombiezen.com/go/capnproto2"
+
 	"golang.org/x/crypto/nacl/box"
 
 	"github.com/numbleroot/zeno/rpc"
@@ -52,6 +54,36 @@ func (cl *Client) ReconnectToEntries() error {
 	return nil
 }
 
+func (cl *Client) OnionEncryptAndSend(convoExitMsg []byte, chain int) {
+
+	// TODO: Going through chains in reverse,
+	//       encrypt ConvoExitMsg symmetrically
+	//       as content. Pack into ConvoMixMsg
+	//       and prepend with used public key.
+
+	// TODO: Send final layered message to entry mix.
+
+	/*
+		status, err := entry.AddConvoMsg(ctx, func(p rpc.Mix_addConvoMsg_Params) error {
+
+			msg, err := p.NewMsg()
+			if err != nil {
+				return err
+			}
+
+			msg.SetContent([]byte("test payload!"))
+
+			return nil
+
+		}).Struct()
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("\nReceived status reply: '%#v'\n", status)
+	*/
+}
+
 func (cl *Client) HandleMsgs() error {
 
 	tests := []string{
@@ -88,30 +120,39 @@ func (cl *Client) HandleMsgs() error {
 		}
 
 		// Pad message to fixed length.
-		var msgPadded [240]byte
+		var msgPadded [280]byte
 		copy(msgPadded[:], tests[msg])
 
-		fmt.Printf("msg: '%#v', msgPadded: '%#v'\n", tests[msg], msgPadded)
+		// Create empty Cap'n Proto messsage.
+		protoMsg, protoMsgSeg, err := capnp.NewMessage(capnp.SingleSegment(nil))
+		if err != nil {
+			return err
+		}
 
-		/*
-			status, err := entry.AddConvoMsg(ctx, func(p rpc.Mix_addConvoMsg_Params) error {
+		// Fill ConvoExitMsg.
+		convoExitMsg, err := rpc.NewRootConvoExitMsg(protoMsgSeg)
+		if err != nil {
+			return err
+		}
+		convoExitMsg.SetClientAddr("127.0.0.1")
+		convoExitMsg.SetContent(msgPadded[:])
 
-				msg, err := p.NewMsg()
-				if err != nil {
-					return err
-				}
+		// Marshal final ConvoExitMsg to byte slice.
+		protoMsgBytes, err := protoMsg.Marshal()
+		if err != nil {
+			return err
+		}
 
-				msg.SetContent([]byte("test payload!"))
+		cl.SendWG.Add(len(cl.ChainMatrix))
 
-				return nil
+		// In parallel, onion-encrypt the ConvoExitMsg
+		// and send to all entry mixes.
+		for chain := range cl.ChainMatrix {
+			go cl.OnionEncryptAndSend(protoMsgBytes, chain)
+		}
 
-			}).Struct()
-			if err != nil {
-				return err
-			}
-
-			fmt.Printf("\nReceived status reply: '%#v'\n", status)
-		*/
+		// Wait for all entry messages to be sent.
+		cl.SendWG.Wait()
 	}
 
 	return nil

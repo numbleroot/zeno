@@ -69,69 +69,167 @@ func (p MixnetConfig_Promise) Struct() (MixnetConfig, error) {
 	return MixnetConfig{s}, err
 }
 
-type ConvoMsg struct{ capnp.Struct }
+type ConvoExitMsg struct{ capnp.Struct }
 
-// ConvoMsg_TypeID is the unique identifier for the type ConvoMsg.
-const ConvoMsg_TypeID = 0xe4fb25d5577e606e
+// ConvoExitMsg_TypeID is the unique identifier for the type ConvoExitMsg.
+const ConvoExitMsg_TypeID = 0xf45944c62d9e640d
 
-func NewConvoMsg(s *capnp.Segment) (ConvoMsg, error) {
-	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
-	return ConvoMsg{st}, err
+func NewConvoExitMsg(s *capnp.Segment) (ConvoExitMsg, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2})
+	return ConvoExitMsg{st}, err
 }
 
-func NewRootConvoMsg(s *capnp.Segment) (ConvoMsg, error) {
-	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
-	return ConvoMsg{st}, err
+func NewRootConvoExitMsg(s *capnp.Segment) (ConvoExitMsg, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2})
+	return ConvoExitMsg{st}, err
 }
 
-func ReadRootConvoMsg(msg *capnp.Message) (ConvoMsg, error) {
+func ReadRootConvoExitMsg(msg *capnp.Message) (ConvoExitMsg, error) {
 	root, err := msg.RootPtr()
-	return ConvoMsg{root.Struct()}, err
+	return ConvoExitMsg{root.Struct()}, err
 }
 
-func (s ConvoMsg) String() string {
-	str, _ := text.Marshal(0xe4fb25d5577e606e, s.Struct)
+func (s ConvoExitMsg) String() string {
+	str, _ := text.Marshal(0xf45944c62d9e640d, s.Struct)
 	return str
 }
 
-func (s ConvoMsg) Content() ([]byte, error) {
+func (s ConvoExitMsg) ClientAddr() (string, error) {
 	p, err := s.Struct.Ptr(0)
-	return []byte(p.Data()), err
+	return p.Text(), err
 }
 
-func (s ConvoMsg) HasContent() bool {
+func (s ConvoExitMsg) HasClientAddr() bool {
 	p, err := s.Struct.Ptr(0)
 	return p.IsValid() || err != nil
 }
 
-func (s ConvoMsg) SetContent(v []byte) error {
-	return s.Struct.SetData(0, v)
+func (s ConvoExitMsg) ClientAddrBytes() ([]byte, error) {
+	p, err := s.Struct.Ptr(0)
+	return p.TextBytes(), err
 }
 
-// ConvoMsg_List is a list of ConvoMsg.
-type ConvoMsg_List struct{ capnp.List }
-
-// NewConvoMsg creates a new list of ConvoMsg.
-func NewConvoMsg_List(s *capnp.Segment, sz int32) (ConvoMsg_List, error) {
-	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1}, sz)
-	return ConvoMsg_List{l}, err
+func (s ConvoExitMsg) SetClientAddr(v string) error {
+	return s.Struct.SetText(0, v)
 }
 
-func (s ConvoMsg_List) At(i int) ConvoMsg { return ConvoMsg{s.List.Struct(i)} }
+func (s ConvoExitMsg) Content() ([]byte, error) {
+	p, err := s.Struct.Ptr(1)
+	return []byte(p.Data()), err
+}
 
-func (s ConvoMsg_List) Set(i int, v ConvoMsg) error { return s.List.SetStruct(i, v.Struct) }
+func (s ConvoExitMsg) HasContent() bool {
+	p, err := s.Struct.Ptr(1)
+	return p.IsValid() || err != nil
+}
 
-func (s ConvoMsg_List) String() string {
-	str, _ := text.MarshalList(0xe4fb25d5577e606e, s.List)
+func (s ConvoExitMsg) SetContent(v []byte) error {
+	return s.Struct.SetData(1, v)
+}
+
+// ConvoExitMsg_List is a list of ConvoExitMsg.
+type ConvoExitMsg_List struct{ capnp.List }
+
+// NewConvoExitMsg creates a new list of ConvoExitMsg.
+func NewConvoExitMsg_List(s *capnp.Segment, sz int32) (ConvoExitMsg_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2}, sz)
+	return ConvoExitMsg_List{l}, err
+}
+
+func (s ConvoExitMsg_List) At(i int) ConvoExitMsg { return ConvoExitMsg{s.List.Struct(i)} }
+
+func (s ConvoExitMsg_List) Set(i int, v ConvoExitMsg) error { return s.List.SetStruct(i, v.Struct) }
+
+func (s ConvoExitMsg_List) String() string {
+	str, _ := text.MarshalList(0xf45944c62d9e640d, s.List)
 	return str
 }
 
-// ConvoMsg_Promise is a wrapper for a ConvoMsg promised by a client call.
-type ConvoMsg_Promise struct{ *capnp.Pipeline }
+// ConvoExitMsg_Promise is a wrapper for a ConvoExitMsg promised by a client call.
+type ConvoExitMsg_Promise struct{ *capnp.Pipeline }
 
-func (p ConvoMsg_Promise) Struct() (ConvoMsg, error) {
+func (p ConvoExitMsg_Promise) Struct() (ConvoExitMsg, error) {
 	s, err := p.Pipeline.Struct()
-	return ConvoMsg{s}, err
+	return ConvoExitMsg{s}, err
+}
+
+type ConvoMixMsg struct{ capnp.Struct }
+
+// ConvoMixMsg_TypeID is the unique identifier for the type ConvoMixMsg.
+const ConvoMixMsg_TypeID = 0xdad8c5d8def4618e
+
+func NewConvoMixMsg(s *capnp.Segment) (ConvoMixMsg, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2})
+	return ConvoMixMsg{st}, err
+}
+
+func NewRootConvoMixMsg(s *capnp.Segment) (ConvoMixMsg, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2})
+	return ConvoMixMsg{st}, err
+}
+
+func ReadRootConvoMixMsg(msg *capnp.Message) (ConvoMixMsg, error) {
+	root, err := msg.RootPtr()
+	return ConvoMixMsg{root.Struct()}, err
+}
+
+func (s ConvoMixMsg) String() string {
+	str, _ := text.Marshal(0xdad8c5d8def4618e, s.Struct)
+	return str
+}
+
+func (s ConvoMixMsg) PubKey() ([]byte, error) {
+	p, err := s.Struct.Ptr(0)
+	return []byte(p.Data()), err
+}
+
+func (s ConvoMixMsg) HasPubKey() bool {
+	p, err := s.Struct.Ptr(0)
+	return p.IsValid() || err != nil
+}
+
+func (s ConvoMixMsg) SetPubKey(v []byte) error {
+	return s.Struct.SetData(0, v)
+}
+
+func (s ConvoMixMsg) Content() ([]byte, error) {
+	p, err := s.Struct.Ptr(1)
+	return []byte(p.Data()), err
+}
+
+func (s ConvoMixMsg) HasContent() bool {
+	p, err := s.Struct.Ptr(1)
+	return p.IsValid() || err != nil
+}
+
+func (s ConvoMixMsg) SetContent(v []byte) error {
+	return s.Struct.SetData(1, v)
+}
+
+// ConvoMixMsg_List is a list of ConvoMixMsg.
+type ConvoMixMsg_List struct{ capnp.List }
+
+// NewConvoMixMsg creates a new list of ConvoMixMsg.
+func NewConvoMixMsg_List(s *capnp.Segment, sz int32) (ConvoMixMsg_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 2}, sz)
+	return ConvoMixMsg_List{l}, err
+}
+
+func (s ConvoMixMsg_List) At(i int) ConvoMixMsg { return ConvoMixMsg{s.List.Struct(i)} }
+
+func (s ConvoMixMsg_List) Set(i int, v ConvoMixMsg) error { return s.List.SetStruct(i, v.Struct) }
+
+func (s ConvoMixMsg_List) String() string {
+	str, _ := text.MarshalList(0xdad8c5d8def4618e, s.List)
+	return str
+}
+
+// ConvoMixMsg_Promise is a wrapper for a ConvoMixMsg promised by a client call.
+type ConvoMixMsg_Promise struct{ *capnp.Pipeline }
+
+func (p ConvoMixMsg_Promise) Struct() (ConvoMixMsg, error) {
+	s, err := p.Pipeline.Struct()
+	return ConvoMixMsg{s}, err
 }
 
 type Batch struct{ capnp.Struct }
@@ -527,9 +625,9 @@ func (s Mix_addConvoMsg_Params) String() string {
 	return str
 }
 
-func (s Mix_addConvoMsg_Params) Msg() (ConvoMsg, error) {
+func (s Mix_addConvoMsg_Params) Msg() (ConvoMixMsg, error) {
 	p, err := s.Struct.Ptr(0)
-	return ConvoMsg{Struct: p.Struct()}, err
+	return ConvoMixMsg{Struct: p.Struct()}, err
 }
 
 func (s Mix_addConvoMsg_Params) HasMsg() bool {
@@ -537,16 +635,16 @@ func (s Mix_addConvoMsg_Params) HasMsg() bool {
 	return p.IsValid() || err != nil
 }
 
-func (s Mix_addConvoMsg_Params) SetMsg(v ConvoMsg) error {
+func (s Mix_addConvoMsg_Params) SetMsg(v ConvoMixMsg) error {
 	return s.Struct.SetPtr(0, v.Struct.ToPtr())
 }
 
 // NewMsg sets the msg field to a newly
-// allocated ConvoMsg struct, preferring placement in s's segment.
-func (s Mix_addConvoMsg_Params) NewMsg() (ConvoMsg, error) {
-	ss, err := NewConvoMsg(s.Struct.Segment())
+// allocated ConvoMixMsg struct, preferring placement in s's segment.
+func (s Mix_addConvoMsg_Params) NewMsg() (ConvoMixMsg, error) {
+	ss, err := NewConvoMixMsg(s.Struct.Segment())
 	if err != nil {
-		return ConvoMsg{}, err
+		return ConvoMixMsg{}, err
 	}
 	err = s.Struct.SetPtr(0, ss.Struct.ToPtr())
 	return ss, err
@@ -582,8 +680,8 @@ func (p Mix_addConvoMsg_Params_Promise) Struct() (Mix_addConvoMsg_Params, error)
 	return Mix_addConvoMsg_Params{s}, err
 }
 
-func (p Mix_addConvoMsg_Params_Promise) Msg() ConvoMsg_Promise {
-	return ConvoMsg_Promise{Pipeline: p.Pipeline.GetPipeline(0)}
+func (p Mix_addConvoMsg_Params_Promise) Msg() ConvoMixMsg_Promise {
+	return ConvoMixMsg_Promise{Pipeline: p.Pipeline.GetPipeline(0)}
 }
 
 type Mix_addConvoMsg_Results struct{ capnp.Struct }
@@ -796,47 +894,54 @@ func (p Mix_addBatch_Results_Promise) Struct() (Mix_addBatch_Results, error) {
 	return Mix_addBatch_Results{s}, err
 }
 
-const schema_a1ac1f9011521afa = "x\xda\x94\x94OH\x14o\x18\xc7\x9f\xe7}g\x9d\xdf" +
-	"\x0f\xdau\xc7\xe9$\xc5R\xe8!!3\xa3\x08\xadV" +
-	"\x14\x0f\x0a\x1b;K\x10\x85\x87\xc6\xddi\x1dpg\xcc" +
-	"\xf7\xb5\xd6K\x86\x10\xd1M\x84.\x1d\x82\x02\xebP\x1e" +
-	"\x84\xa8(\x12\x0c\"\x8a\xba%Q\x9d\x82\xa2C`\xff" +
-	"\xb0\xa0\x88\x89\xf7\x1d\xe7\x8f\x9bQ\xdd\x9e\x85\xef~\x9e" +
-	"\xe7\xfb}\xdeg\xda\xaa\xd8E\xb6'\x9e)\x00\xc6\xee" +
-	"D\x9d\xb7k \xb9\xd46\xb7\xe7\x0c\x18\x0d\x88\x00\x8a" +
-	"\x0a\xb0\xc3 \x8d\x08\xa8\x1f\"Y@\xefD\xef\xe4\xc4" +
-	"xfx\x1a\xb4\x06\x04H\xa0\x10\x8c\x93\x82\x10\x9c\x96" +
-	"\x82\xcb\x87'\x97\xfe\xb7\xce\x9e\x03#\x85\xe8}k," +
-	"hS\x99k\x17%I\x9f!/\xf49\"\xaaY\xa9" +
-	"}\xd9\xaf\\\xffz\xf5\xf3\x8c\x0f\x93\xcd\x16I?\x82" +
-	"\xe2\xcdN\xed{\xeb\\X\xbe\x02Z*\x06\x91\xed\xf4" +
-	"\x05rI\x7f()\xf7%\x85=\xaa\x1fxr\xf3\xf1" +
-	"\x8d\xf8\xcc\xcb\xa4]\x8c\xf4C\x0a\x12\xd6\xa7\xf9/\x0b" +
-	"Oo\xc5g\xdeH\x1b\x84\xa0\x99\x0a\x81s\xe4\xe4\xc1" +
-	"\xc5\xe6\xef\xaf\xd7\xea\xd6Ko\xeb9*\xaa>\xa9\xcd" +
-	"\x17\xeev\xa6\xef\xdc{\x03Z\x8aFZ@\xdd\xa6\xd3" +
-	"\xfa1)\xac\xd0\x07\xfaGQy\xef\x06:\xe7\x95\xf7" +
-	"\xa7>\xc4;?\xa7-\xa2\xf3+\x9a\x85\xad\xde\xe8H" +
-	"q[\xc5\xae\xb6\xd2\xa29\xe2\x8ct\xe4\xecj\xabY" +
-	"*u\x9b\xbc8\xd4T\xb0\xd8\xd80\xe5\xccP\xa8\x02" +
-	"\xa0 \x80\x96\xec\x000\xfe\xa3h\xac'\x98e\xdc\xe4" +
-	"c\x0c\xeb\x80`\x1d`\x88R\"T\xd9\xe29\xbb\xea" +
-	"X\xbc\xc7u\x8e\xdae\x9f\xc8q\x15\xb1%\"\xd6W" +
-	",nb:Z! \xa6cd\x12\x92W\x90\xd4." +
-	"\xe7\x11\xe3\xb4\xf3\x00F\x9a\xa2\xb1\x81\xa0\xc7\xac\xa2\xeb" +
-	"\x94\xd8\x01t\xf7[U^p\xc7\xa8SB\x15\x08\xaa" +
-	"\x7f7m\xde\x1c5+\x0c \xd4\xa2\xaf\xed6U^" +
-	"\x1c\xaai\x1c\xd8h\x126X\x99a\x0a0O\x11\x93" +
-	"@D\xf9\x9b\xa0{\\\xe7\xb8\x9bc\"\x99\x8c\x88\xe6" +
-	"_\xb3^kmr\xec\xd5\x19\xb7G\xa4\xcc\xa0\x10a" +
-	":z\xe15!\xaf\x98\xecq\xb3\xfeh5>\xbb#" +
-	"\xd4D\xd1u\xb8\xe5p\xe91\xf9+\"gcU\xfc" +
-	"{\x1dM\x00\x84\xb7\x86\xc1\x05k\xc6$\x10\xadOE" +
-	"\x0c\x9f)\x06\xa7\xa4\xed\x1d\x04\xa2\xedT\x91\x84\xc7\x83" +
-	"\xc1\xa7A\xdb\xd2\x0fD\xdb\xa4z\xc1\xbepea\xd0" +
-	"\x85^\x90)\xa89V\xf6\x7f\xcbT\x00\xa0\x0b\xf3\xf8" +
-	"\xc7=\xe4\xcdz\xb1\xf4\xb8\xe3\xcd\x91c\xb5\xc2\xca\x98" +
-	"\x8e\xce\xd5\x8f\xeeg\x00\x00\x00\xff\xff\xad&L1"
+const schema_a1ac1f9011521afa = "x\xda\x94\x94OHT[\x1c\xc7\x7f\xbfs\xeex}" +
+	"\xe0\x8cs\xbd\xae\xe4\xc1\xe0\xc3\xc5S\x9e\x7f\xdf\x1f\x1e" +
+	"\xea{\x9a\xe6B\xe3\xc6\xdc\xa1Mb\x8b\xeb\xccm\xbc" +
+	"\xe0\xdc\x99<wrf!\x86\x10\xd1&Dh\xd3B" +
+	"(\xb0\x16\xd5B\x88\x12\"\xa1\xa0\x82\xa8EQ\xa0\x86" +
+	"\xed\xa2Ed\xff\xb4\xa0\xcd\x8ds\xc6\xb9w\x9c\xec\xdf" +
+	"\xee\\\xf8\xf2\xfd~\xcf\xe7w\x7f\xa7m\x09{I{" +
+	"\xa05\x00\xa0w\x07*\xdc\x7fF\x82\x1bm\x8b\xdd'" +
+	"@\xafA\x04\x90d\x80?\xa7H\x1d\x02\xaa\xc7I\x0f" +
+	"\xa0;903\x9d\x8f\x8c\xcf\x81R\x83\x00\x01\xe4\x82" +
+	"\x05\x12\xe3\x82E!8?<\xb3\xf1\x8by\xf24\xe8" +
+	"!D\xf7S]L\x99\x8d\\:+\x9c\xd4\x87dM" +
+	"]'\xfc\xb4*\xb4O\x87\xa4+\x1f/\xbe_(\x98" +
+	"\x890\xa4C\x08\x92{y\xf6\xff\x17\xf6\xfc\xd6\x05P" +
+	"B%&\"N}E\xce\xa9[\xc2\xe5\xadpa\xf7" +
+	"\xaaG\x1e\\\xbb\x7f\xb5\xb4s=\xed\xe0\x95\x1a)\x17" +
+	"\x04\xccw\xcb\x1fn>^*\xed<Hk\xb8@\x17" +
+	"\x82S\xc6\xe6\xb3\x95\xdb+kei\"\xe3\x08}\xa4" +
+	"NQ~\xca\xd3I@7\x1a\xbb\xd1\x15\xbe~\xeb9" +
+	"(!\xeak\x01\xd5'tN]\x17\xc2UzW=" +
+	"\xc4k\xb8/G\xba\x96\xa5\xd7\xc7\xde\x94&\x0fHM" +
+	"<Y\x93xr01\xdf|g\xef\xc1\xcd\xdd\x92S" +
+	"\xd2\x9a\x9a\x17\xdc\xb2\xd2$4\xbb\x13\x99xk\xca\xca" +
+	"\xb5\xd0\xb8\x91\xb13\x9d\x9a\x95k1\x12\x89>\xc3\x89" +
+	"\x8f5\xc4L\x96\x1d\xa7\x0e\xd3%*\x01H\x08\xa0\x04" +
+	";\x01\xf4J\x8az-\xc1\x1e\xe6\x18N\x96a\x05\x10" +
+	"\xac\x00\xf4\xac$\xdf*i:\x9a\x95\xb3M\xa7?m" +
+	"\x1f\xb6\x92\x05G\x07w86\xf9\x8e\xd5)\xd310" +
+	"\xec\x8f\x1b\x10\xc3%\xce\xc4s\xde\xb6\xa4V2\x8aX" +
+	"\xeav\x06@\x0fS\xd4\x7f%\xe823\x9e\xb6\x13\xec" +
+	"\x00\xa6\xf7\x9b9'\x96\xceR;\x812\x10\x94\x7f\xac" +
+	"m\xd4\x980R\x0c\xc0\xd3bA\xdbg\xc8N|\xac" +
+	",\xb8x\x8d\x06~\x0d\x96d\x18\x02\x8cR\xc4 \x10" +
+	"~\xfc\x0a\xe8\xfe\xb4}4\xad1N&\xc2\xd1\xfc," +
+	"\xeb\xdd\xc6&j\xefd\xdc\xe1;EF\xb9\x08\xc3\xfe" +
+	"6\xec\x0e\xb9\xd0\xcc\xcai\x0c\x05\xe3J\xcf\xad\x91\xf7" +
+	"j\xa0\xa8\xb7\x11T\x10k\xf9~(\xcd}\x00\xfa\xef" +
+	"\x14\xf5\xbf\x08\xf6d\xb2\xa3\xfb\xcc\xbc\xb8z\x10p:" +
+	"\x9e\xb6\x1d\xd3v\x8a\xdf\xe585\x0bs<\xa1\x8a\x06" +
+	"\x00\xbc\xf5\xc5\xe2\xa3\xa0\xe83@\x94A\x19\xd1\xfb\xf3" +
+	"\xb1\xb8\x9d\xca\x7f\xa3@\x94\xbfe$\xde>b\xf1\xb5" +
+	"Q\x1a\x87\x80(\xf5\xb2[\x1c+n\xcf\x15z\xd1-" +
+	"\xa2\x07Yc\xc9\xc2\xb7\x80\x07\x00\xbd\x18\xc5\xef\x8e+" +
+	"jT\xf3\x7f\xa3\x94\xf1o>c9\xc5\x92\x18\xf6_" +
+	"\x80o\x10\x1e\xc8Y\x8eFY9\xe2a\x9f\xa6\x87\xb8" +
+	"\x9d#\xfe\x83\xa2\xfe/A7>n\x99\xb6\xb3'\x01" +
+	"41\x81U@\xb0\xeaK\xd0\x9f\x03\x00\x00\xff\xff\xfe" +
+	"tx\x9f"
 
 func init() {
 	schemas.Register(schema_a1ac1f9011521afa,
@@ -847,7 +952,8 @@ func init() {
 		0xa7f59e6ee73e90ad,
 		0xb6ccb7cd5c0fca73,
 		0xb8d4c1f6bef26505,
-		0xe4fb25d5577e606e,
+		0xdad8c5d8def4618e,
 		0xe5c2bb103bbd5250,
-		0xf080ef04be3b5ceb)
+		0xf080ef04be3b5ceb,
+		0xf45944c62d9e640d)
 }

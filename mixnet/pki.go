@@ -106,7 +106,7 @@ func (node *Node) ConfigureChainMatrix(connRead *bufio.Reader, connWrite net.Con
 	//       public key, set flag whether we are an
 	//       entry mix or a common one.
 
-	// TODO: Signal channel node.ChainMatrixConfigured.
+	// Signal channel node.ChainMatrixConfigured.
 	node.ChainMatrixConfigured <- struct{}{}
 
 	return nil

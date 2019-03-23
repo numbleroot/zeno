@@ -7,8 +7,14 @@ struct MixnetConfig {
     secondsToNextRound @0 :UInt16;
 }
 
-struct ConvoMsg {
-    content @0 :Data;
+struct ConvoExitMsg {
+    clientAddr @0 :Text;
+    content @1 :Data;
+}
+
+struct ConvoMixMsg {
+    pubKey @0 :Data;
+    content @1 :Data;
 }
 
 struct Batch {
@@ -17,6 +23,6 @@ struct Batch {
 
 interface Mix {
     getMixnetConfig @0 () -> (meta :MixnetConfig);
-    addConvoMsg @1 (msg :ConvoMsg) -> (status :UInt8);
+    addConvoMsg @1 (msg :ConvoMixMsg) -> (status :UInt8);
     addBatch @2 (batch :Batch) -> (status :UInt8);
 }
