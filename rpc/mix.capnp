@@ -14,7 +14,8 @@ struct ConvoExitMsg {
 
 struct ConvoMixMsg {
     pubKey @0 :Data;
-    content @1 :Data;
+    nonce @1 :Data;
+    content @2 :Data;
 }
 
 struct Batch {

@@ -2,15 +2,14 @@ package mixnet
 
 import (
 	"context"
-	"crypto/rand"
 	"fmt"
 	"net"
-
-	capnp "zombiezen.com/go/capnproto2"
+	"os"
 
 	"golang.org/x/crypto/nacl/box"
 
 	"github.com/numbleroot/zeno/rpc"
+	capnp "zombiezen.com/go/capnproto2"
 	capnprpc "zombiezen.com/go/capnproto2/rpc"
 )
 
@@ -27,10 +26,14 @@ func (cl *Client) ReconnectToEntries() error {
 		}
 	}
 
+	fmt.Printf("Connecting to entry mixes now\n")
+
 	// Make space for the ones from this epoch.
 	cl.EntryConns = make([]*rpc.Mix, len(cl.ChainMatrix))
 
 	for chain := 0; chain < len(cl.ChainMatrix); chain++ {
+
+		fmt.Printf("\tEntry mix %s now\n", chain)
 
 		// Connect to each entry mix over TCP.
 		conn, err := net.Dial("tcp", cl.ChainMatrix[chain][0].Addr)
@@ -51,15 +54,51 @@ func (cl *Client) ReconnectToEntries() error {
 		cl.EntryConns[chain] = entryMix
 	}
 
+	fmt.Printf("Connected to entry mixes\n")
+
 	return nil
 }
 
 func (cl *Client) OnionEncryptAndSend(convoExitMsg []byte, chain int) {
 
-	// TODO: Going through chains in reverse,
-	//       encrypt ConvoExitMsg symmetrically
-	//       as content. Pack into ConvoMixMsg
-	//       and prepend with used public key.
+	msg := convoExitMsg
+
+	// Going through chains in reverse, encrypt
+	// ConvoExitMsg symmetrically as content.
+	// Pack into ConvoMixMsg and prepend with
+	// used public key.
+	for mix := (len(cl.ChainMatrix[chain]) - 1); mix >= 0; mix-- {
+
+		// Use precomputed nonce and shared key to
+		// symmetrically encrypt the current message.
+		encMsg := box.SealAfterPrecomputation(cl.CurRound.Nonce[:], msg, cl.CurRound.Nonce, cl.CurRound.MsgKeys[chain][mix].SymKey)
+
+		// Create empty Cap'n Proto messsage.
+		protoMsg, protoMsgSeg, err := capnp.NewMessage(capnp.SingleSegment(nil))
+		if err != nil {
+			fmt.Printf("Failed creating empty Cap'n Proto message: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Create new ConvoMixMsg and insert values.
+		convoMixMsg, err := rpc.NewRootConvoMixMsg(protoMsgSeg)
+		if err != nil {
+			fmt.Printf("Failed creating new root ConvoMixMsg: %v\n", err)
+			os.Exit(1)
+		}
+		convoMixMsg.SetPubKey(cl.CurRound.MsgKeys[chain][mix].PubKey[:])
+		convoMixMsg.SetNonce(cl.CurRound.Nonce[:])
+		convoMixMsg.SetContent(encMsg)
+
+		// Marshal final ConvoMixMsg to byte slice.
+		msg, err = protoMsg.Marshal()
+		if err != nil {
+			fmt.Printf("Failed marshalling final ConvoMixMsg to []byte: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	fmt.Printf("Onionized message:\n'%#v'\nlen(msg) = %d\n", msg, len(msg))
 
 	// TODO: Send final layered message to entry mix.
 
@@ -103,27 +142,13 @@ func (cl *Client) HandleMsgs() error {
 
 	for msg := range tests {
 
-		// Key material.
+		fmt.Printf("Handling messages now\n")
 
-		msgKeys := make([][]*[32]byte, len(cl.ChainMatrix))
-
-		for chain := range cl.ChainMatrix {
-
-			msgKeys[chain] = make([]*[32]byte, len(cl.ChainMatrix[chain]))
-
-			for mix := range cl.ChainMatrix[chain] {
-
-				// Generate public-private key pair.
-				// msgPubKey, msgSecKey, err := box.GenerateKey(rand.Reader)
-				_, msgSecKey, err := box.GenerateKey(rand.Reader)
-				if err != nil {
-					return err
-				}
-
-				// Calculate shared key between ephemeral
-				// secret key and receive public key of each mix.
-				box.Precompute(msgKeys[chain][mix], cl.ChainMatrix[chain][mix].PubKey, msgSecKey)
-			}
+		// Prepare the needed new round state,
+		// primarily including fresh key material.
+		err := cl.InitNewRound()
+		if err != nil {
+			return err
 		}
 
 		// Pad message to fixed length.
