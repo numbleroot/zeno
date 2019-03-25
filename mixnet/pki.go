@@ -87,11 +87,13 @@ func (node *Node) RegisterClient() error {
 	return nil
 }
 
+// ConfigureChainMatrix parses the received
+// set of cascade candidates and executes
+// the deterministic cascades election that
+// are captured in chain matrix afterwards.
 func (node *Node) ConfigureChainMatrix(connRead *bufio.Reader, connWrite net.Conn) error {
 
 	fmt.Printf("Candidates broadcast received!\n")
-
-	fmt.Fprintf(connWrite, "0\n")
 
 	// TODO: Parse list of addresses and public keys
 	//       received from PKI into candidates slice.
@@ -109,9 +111,14 @@ func (node *Node) ConfigureChainMatrix(connRead *bufio.Reader, connWrite net.Con
 	// Signal channel node.ChainMatrixConfigured.
 	node.ChainMatrixConfigured <- struct{}{}
 
+	fmt.Fprintf(connWrite, "0\n")
+
 	return nil
 }
 
+// HandlePKIMsgs runs in a loop waiting for
+// incoming messages from the PKI. Usually,
+// they will contain cascade candidates.
 func (node *Node) HandlePKIMsgs() {
 
 	for {
@@ -119,7 +126,7 @@ func (node *Node) HandlePKIMsgs() {
 		// Wait for incoming connections from PKI.
 		connWrite, err := node.PKIListener.Accept()
 		if err != nil {
-			fmt.Printf("PKI connection error: %v\n", err)
+			fmt.Printf("Error accepting connection from PKI: %v\n", err)
 			continue
 		}
 

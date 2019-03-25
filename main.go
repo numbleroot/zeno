@@ -85,7 +85,6 @@ func main() {
 
 	// Construct common node characteristics.
 	node := &mixnet.Node{
-		ShutDown:   make(chan struct{}),
 		RecvPubKey: recvPubKey,
 		RecvSecKey: recvSecKey,
 		PKIAddr:    pkiAddr,
@@ -120,11 +119,12 @@ func main() {
 			os.Exit(1)
 		}
 
+		fmt.Printf("Waiting for chain matrix to configure...\n")
+
 		// Wait until chainMatrix has been built.
 		<-node.ChainMatrixConfigured
 
-		// Determine whether this node is an entry
-		// or a common mix node.
+		fmt.Printf("Chain matrix configured.\n")
 
 		mix := &mixnet.Mix{
 			Node: node,
@@ -161,12 +161,12 @@ func main() {
 			os.Exit(1)
 		}
 
-		fmt.Printf("Waiting for chain matrix to configure...")
+		fmt.Printf("Waiting for chain matrix to configure...\n")
 
 		// Wait until chainMatrix has been built.
 		<-node.ChainMatrixConfigured
 
-		fmt.Printf(" received!\n")
+		fmt.Printf("Chain matrix configured.\n")
 
 		client := &mixnet.Client{
 			Node:   node,

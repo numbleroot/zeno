@@ -16,7 +16,6 @@ type Endpoint struct {
 // Node collects the basic information
 // any node in our system works with.
 type Node struct {
-	ShutDown              chan struct{}
 	RecvPubKey            *[32]byte
 	RecvSecKey            *[32]byte
 	PKIAddr               string

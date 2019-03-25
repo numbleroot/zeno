@@ -15,7 +15,7 @@ import (
 )
 
 // ReconnectToEntries opens up new RPC connections
-// over TCP to each entry mix in chainMatrix.
+// over TCP to each entry mix in the chain matrix.
 func (cl *Client) ReconnectToEntries() error {
 
 	for c := range cl.EntryConns {
@@ -84,6 +84,13 @@ func (cl *Client) OnionEncryptAndSend(convoExitMsg []byte, chain int) {
 	*/
 }
 
+// HandleMsgs is the main user input loop
+// on a zeno client. It accepts lines typed
+// by the user, times and pads them properly,
+// onion-encrypts and transmits them to each
+// cascade. If no user message is available
+// in a round, cover traffic is encrypted
+// and sent in its place.
 func (cl *Client) HandleMsgs() error {
 
 	tests := []string{
@@ -145,8 +152,8 @@ func (cl *Client) HandleMsgs() error {
 
 		cl.SendWG.Add(len(cl.ChainMatrix))
 
-		// In parallel, onion-encrypt the ConvoExitMsg
-		// and send to all entry mixes.
+		// In parallel, reverse onion-encrypt the
+		// ConvoExitMsg and send to all entry mixes.
 		for chain := range cl.ChainMatrix {
 			go cl.OnionEncryptAndSend(protoMsgBytes, chain)
 		}
