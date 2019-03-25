@@ -61,6 +61,8 @@ func (cl *Client) ReconnectToEntries() error {
 
 func (cl *Client) OnionEncryptAndSend(convoExitMsg []byte, chain int) {
 
+	fmt.Printf("Encrypting messages now\n")
+
 	msg := convoExitMsg
 
 	// Going through chains in reverse, encrypt

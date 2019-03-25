@@ -88,6 +88,7 @@ func main() {
 		RecvPubKey: recvPubKey,
 		RecvSecKey: recvSecKey,
 		PKIAddr:    pkiAddr,
+		PKILisAddr: pkiLisAddr,
 		PKITLSConf: &tls.Config{
 			RootCAs:            pkiCertRoot,
 			InsecureSkipVerify: false,

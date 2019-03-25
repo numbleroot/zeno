@@ -39,6 +39,7 @@ type Node struct {
 	RecvPubKey            *[32]byte
 	RecvSecKey            *[32]byte
 	PKIAddr               string
+	PKILisAddr            string
 	PKITLSConf            *tls.Config
 	PKIListener           net.Listener
 	ChainMatrixConfigured chan struct{}

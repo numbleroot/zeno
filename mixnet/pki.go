@@ -31,7 +31,7 @@ func (node *Node) RegisterMixIntent() error {
 	// Register this node's intent on participating
 	// as a mix node by posting its receive public key
 	// and a TLS certificate for the PKI to connect with.
-	fmt.Fprintf(connWrite, "post mixes %x\n", *node.RecvPubKey)
+	fmt.Fprintf(connWrite, "post mixes %s %x\n", node.PKILisAddr, *node.RecvPubKey)
 
 	// Expect an acknowledgement.
 	resp, err := connRead.ReadString('\n')
@@ -66,7 +66,7 @@ func (node *Node) RegisterClient() error {
 	connRead := bufio.NewReader(connWrite)
 
 	// Register this node as a client in the system.
-	fmt.Fprintf(connWrite, "post clients %x\n", *node.RecvPubKey)
+	fmt.Fprintf(connWrite, "post clients %s %x\n", node.PKILisAddr, *node.RecvPubKey)
 
 	// Expect an acknowledgement.
 	resp, err := connRead.ReadString('\n')
@@ -81,7 +81,6 @@ func (node *Node) RegisterClient() error {
 	}
 
 	// Close connection.
-	fmt.Fprintf(connWrite, "quit\n")
 	connWrite.Close()
 
 	return nil
