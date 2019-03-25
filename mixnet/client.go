@@ -33,7 +33,7 @@ func (cl *Client) ReconnectToEntries() error {
 
 	for chain := 0; chain < len(cl.ChainMatrix); chain++ {
 
-		fmt.Printf("\tEntry mix %s now\n", chain)
+		fmt.Printf("\tEntry mix %s now\n", cl.ChainMatrix[chain][0].Addr)
 
 		// Connect to each entry mix over TCP.
 		conn, err := net.Dial("tcp", cl.ChainMatrix[chain][0].Addr)
@@ -54,7 +54,7 @@ func (cl *Client) ReconnectToEntries() error {
 		cl.EntryConns[chain] = entryMix
 	}
 
-	fmt.Printf("Connected to entry mixes\n")
+	fmt.Printf("Connected to entry mixes\n\n")
 
 	return nil
 }
@@ -69,7 +69,7 @@ func (cl *Client) OnionEncryptAndSend(convoExitMsg []byte, chain int) {
 	// ConvoExitMsg symmetrically as content.
 	// Pack into ConvoMixMsg and prepend with
 	// used public key.
-	for mix := (len(cl.ChainMatrix[chain]) - 1); mix >= 0; mix-- {
+	for mix := (len(cl.ChainMatrix[chain]) - 1); mix > 0; mix-- {
 
 		// Use precomputed nonce and shared key to
 		// symmetrically encrypt the current message.
@@ -98,31 +98,34 @@ func (cl *Client) OnionEncryptAndSend(convoExitMsg []byte, chain int) {
 			fmt.Printf("Failed marshalling final ConvoMixMsg to []byte: %v\n", err)
 			os.Exit(1)
 		}
+
+		fmt.Printf("len(msg) = %d", len(msg))
 	}
 
-	fmt.Printf("Onionized message:\n'%#v'\nlen(msg) = %d\n", msg, len(msg))
+	fmt.Printf("Onionized message:\n'%#v'\nlen(finalMessage) = %d\n", msg, len(msg))
 
 	// TODO: Send final layered message to entry mix.
 
-	/*
-		status, err := entry.AddConvoMsg(ctx, func(p rpc.Mix_addConvoMsg_Params) error {
+	status, err := cl.EntryConns[chain].AddConvoMsg(context.Background(), func(p rpc.Mix_addConvoMsg_Params) error {
 
-			msg, err := p.NewMsg()
-			if err != nil {
-				return err
-			}
-
-			msg.SetContent([]byte("test payload!"))
-
-			return nil
-
-		}).Struct()
+		entryConvoMixMsg, err := p.NewMsg()
 		if err != nil {
 			return err
 		}
+		entryConvoMixMsg.SetPubKey(cl.CurRound.MsgKeys[chain][0].PubKey[:])
+		entryConvoMixMsg.SetNonce(cl.CurRound.Nonce[:])
+		entryConvoMixMsg.SetContent(msg)
 
-		fmt.Printf("\nReceived status reply: '%#v'\n", status)
-	*/
+		return nil
+
+	}).Struct()
+	if err != nil {
+		fmt.Printf("Error while sending onion-encrypted message to entry mix %s: %v\n", cl.ChainMatrix[chain][0].Addr, err)
+	}
+
+	fmt.Printf("\nReceived status reply: '%#v'\n", status)
+
+	cl.SendWG.Done()
 }
 
 // HandleMsgs is the main user input loop
@@ -176,6 +179,8 @@ func (cl *Client) HandleMsgs() error {
 		if err != nil {
 			return err
 		}
+
+		fmt.Printf("len(convoExitMsg) = %d\n", len(protoMsgBytes))
 
 		cl.SendWG.Add(len(cl.ChainMatrix))
 

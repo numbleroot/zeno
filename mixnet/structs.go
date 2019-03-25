@@ -43,7 +43,7 @@ type Node struct {
 	PKITLSConf            *tls.Config
 	PKIListener           net.Listener
 	ChainMatrixConfigured chan struct{}
-	ChainMatrix           [][]Endpoint
+	ChainMatrix           [][]*Endpoint
 }
 
 // Client represents a client node in

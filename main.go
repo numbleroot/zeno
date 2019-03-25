@@ -125,7 +125,7 @@ func main() {
 		// Wait until chainMatrix has been built.
 		<-node.ChainMatrixConfigured
 
-		fmt.Printf("Chain matrix configured.\n")
+		fmt.Printf("Chain matrix configured.\n\n")
 
 		mix := &mixnet.Mix{
 			Node: node,
@@ -167,7 +167,7 @@ func main() {
 		// Wait until chainMatrix has been built.
 		<-node.ChainMatrixConfigured
 
-		fmt.Printf("Chain matrix configured.\n")
+		fmt.Printf("Chain matrix configured.\n\n")
 
 		client := &mixnet.Client{
 			Node:   node,

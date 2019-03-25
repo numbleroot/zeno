@@ -35,7 +35,12 @@ func (cl *Client) InitNewRound() error {
 			if err != nil {
 				return err
 			}
-			cl.CurRound.MsgKeys[chain][mix].PubKey = msgPubKey
+
+			// Insert appropriate new key struct.
+			cl.CurRound.MsgKeys[chain][mix] = &OnionKeyPair{
+				PubKey: msgPubKey,
+				SymKey: new([32]byte),
+			}
 
 			// Calculate shared key between ephemeral
 			// secret key and receive public key of each mix.
