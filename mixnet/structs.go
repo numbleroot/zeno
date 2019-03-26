@@ -64,5 +64,6 @@ type Client struct {
 type Mix struct {
 	*Node
 	IsEntry           bool
+	OnChain           int
 	MsgPoolsByIncWait []*[]rpc.ConvoMixMsg
 }
