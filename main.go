@@ -155,14 +155,37 @@ func main() {
 		// TODO: Figure out whether the mix intent of this
 		//       node resulted in it getting elected.
 		elected = true
+
+		if !elected {
+
+			// This node intended to become a mix yet did
+			// not get elected. Register as regular client.
+			err = node.RegisterClient()
+			if err != nil {
+				fmt.Printf("Failed to late-register as client at PKI server: %v\n", err)
+				os.Exit(1)
+			}
+		}
+	}
+
+	// Query PKI for all known clients and stash
+	// list of Endpoints for later use.
+	err = node.GetAllClients()
+	if err != nil {
+		fmt.Printf("Failed retrieving all known clients from PKI: %v\n", err)
 	}
 
 	if elected {
+
+		// This node is a mix and was elected
+		// to be part of the chain matrix.
 
 		mix := &mixnet.Mix{
 			Node: node,
 		}
 
+		// Generate cover messages to random genuine
+		// clients in order to prevent n - 1 attack.
 		err = mix.AddCoverMsgsToPool()
 		if err != nil {
 			fmt.Printf("Failed generating cover traffic messages for pool: %v\n", err)
@@ -183,14 +206,7 @@ func main() {
 
 	} else {
 
-		if !isClient {
-
-			err = node.RegisterClient()
-			if err != nil {
-				fmt.Printf("Failed to register as client at PKI server: %v\n", err)
-				os.Exit(1)
-			}
-		}
+		// This node is a client.
 
 		client := &mixnet.Client{
 			Node:   node,

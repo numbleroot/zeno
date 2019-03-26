@@ -33,9 +33,6 @@ type RoundClient struct {
 	MsgKeys [][]*OnionKeyPair
 }
 
-type RoundMix struct {
-}
-
 // Node collects the basic information
 // any node in our system works with.
 type Node struct {
@@ -49,6 +46,7 @@ type Node struct {
 	PubListener           net.Listener
 	ChainMatrixConfigured chan struct{}
 	ChainMatrix           [][]*Endpoint
+	KnownClients          []*Endpoint
 }
 
 // Client represents a client node in
@@ -65,5 +63,6 @@ type Client struct {
 // system architecture.
 type Mix struct {
 	*Node
-	IsEntry bool
+	IsEntry           bool
+	MsgPoolsByIncWait []*[]rpc.ConvoMixMsg
 }

@@ -87,6 +87,53 @@ func (node *Node) RegisterClient() error {
 	return nil
 }
 
+func (node *Node) GetAllClients() error {
+
+	// Connect to PKI TLS endpoint.
+	connWrite, err := tls.Dial("tcp", node.PKIAddr, node.PKITLSConf)
+	if err != nil {
+		return err
+	}
+
+	// Create buffered I/O reader from connection.
+	connRead := bufio.NewReader(connWrite)
+
+	// Query for a string containing all clients.
+	fmt.Fprintf(connWrite, "getall clients\n")
+
+	// Expect a rather long response string.
+	clientsRaw, err := connRead.ReadString('\n')
+	if err != nil {
+		return err
+	}
+
+	// Parse string into slice of Endpoint.
+	clients := strings.Split(strings.ToLower(strings.Trim(clientsRaw, "\n ")), ";")
+	node.KnownClients = make([]*Endpoint, len(clients))
+
+	for i := range clients {
+
+		client := strings.Split(clients[i], ",")
+
+		// Parse contained public key in hex
+		// representation to byte slice.
+		pubKey := new([32]byte)
+		pubKeyRaw, err := hex.DecodeString(client[1])
+		if err != nil {
+			return err
+		}
+		copy(pubKey[:], pubKeyRaw)
+
+		// Append as new Endpoint.
+		node.KnownClients[i] = &Endpoint{
+			Addr:   client[0],
+			PubKey: pubKey,
+		}
+	}
+
+	return nil
+}
+
 // ConfigureChainMatrix parses the received
 // set of cascade candidates and executes
 // the deterministic cascades election that
@@ -101,31 +148,31 @@ func (node *Node) ConfigureChainMatrix(connRead *bufio.Reader, connWrite net.Con
 
 	fmt.Printf("Candidates broadcast received!\n")
 
-	// TODO: Parse list of addresses and public keys
-	//       received from PKI into candidates slice.
-
+	// Parse list of addresses and public keys
+	// received from PKI into candidates slice.
 	candsLines := strings.Split(strings.ToLower(strings.Trim(candsMsg, "\n ")), ";")
-	cands := make([]*Endpoint, 0, len(candsLines))
+	cands := make([]*Endpoint, len(candsLines))
 
-	for line := range candsLines {
+	for i := range candsLines {
 
-		candsParts := strings.Split(candsLines[line], ",")
+		candsParts := strings.Split(candsLines[i], ",")
 
-		key := new([32]byte)
-		keyRaw, err := hex.DecodeString(candsParts[1])
+		// Parse contained public key in hex
+		// representation to byte slice.
+		pubKey := new([32]byte)
+		pubKeyRaw, err := hex.DecodeString(candsParts[1])
 		if err != nil {
 			return err
 		}
+		copy(pubKey[:], pubKeyRaw)
 
-		copy(key[:], keyRaw)
-
-		cands = append(cands, &Endpoint{
+		cands[i] = &Endpoint{
 			Addr:   candsParts[0],
-			PubKey: key,
-		})
+			PubKey: pubKey,
+		}
 	}
 
-	// TODO: Sort candidates deterministically.
+	// Sort candidates deterministically.
 	sort.Slice(cands, func(i, j int) bool {
 		return cands[i].Addr < cands[j].Addr
 	})
