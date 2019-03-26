@@ -31,9 +31,8 @@ func (node *Node) RegisterMixIntent() error {
 	connRead := bufio.NewReader(connWrite)
 
 	// Register this node's intent on participating
-	// as a mix node by posting its receive public key
-	// and a TLS certificate for the PKI to connect with.
-	fmt.Fprintf(connWrite, "post mixes %s %x\n", node.PKILisAddr, *node.RecvPubKey)
+	// as a mix node with the PKI.
+	fmt.Fprintf(connWrite, "post mixes %s %x %s\n", node.PubLisAddr, *node.RecvPubKey, node.PKILisAddr)
 
 	// Expect an acknowledgement.
 	resp, err := connRead.ReadString('\n')
@@ -68,7 +67,7 @@ func (node *Node) RegisterClient() error {
 	connRead := bufio.NewReader(connWrite)
 
 	// Register this node as a client in the system.
-	fmt.Fprintf(connWrite, "post clients %s %x\n", node.PKILisAddr, *node.RecvPubKey)
+	fmt.Fprintf(connWrite, "post clients %s %x %s\n", node.PubLisAddr, *node.RecvPubKey, node.PKILisAddr)
 
 	// Expect an acknowledgement.
 	resp, err := connRead.ReadString('\n')
@@ -94,13 +93,13 @@ func (node *Node) RegisterClient() error {
 // are captured in chain matrix afterwards.
 func (node *Node) ConfigureChainMatrix(connRead *bufio.Reader, connWrite net.Conn) error {
 
+	// Receive candidates string from PKI.
 	candsMsg, err := connRead.ReadString('\n')
 	if err != nil {
 		return err
 	}
 
 	fmt.Printf("Candidates broadcast received!\n")
-	fmt.Fprintf(connWrite, "0\n")
 
 	// TODO: Parse list of addresses and public keys
 	//       received from PKI into candidates slice.
@@ -144,6 +143,8 @@ func (node *Node) ConfigureChainMatrix(connRead *bufio.Reader, connWrite net.Con
 
 	// Signal channel node.ChainMatrixConfigured.
 	node.ChainMatrixConfigured <- struct{}{}
+
+	connWrite.Close()
 
 	return nil
 }

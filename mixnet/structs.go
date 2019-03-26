@@ -42,6 +42,8 @@ type Node struct {
 	PKILisAddr            string
 	PKITLSConf            *tls.Config
 	PKIListener           net.Listener
+	PubLisAddr            string
+	PubListener           net.Listener
 	ChainMatrixConfigured chan struct{}
 	ChainMatrix           [][]*Endpoint
 }
@@ -60,6 +62,5 @@ type Client struct {
 // system architecture.
 type Mix struct {
 	*Node
-	PubListener net.Listener
-	IsEntry     bool
+	IsEntry bool
 }

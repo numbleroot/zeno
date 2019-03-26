@@ -95,17 +95,26 @@ func main() {
 			MinVersion:         tls.VersionTLS13,
 			CurvePreferences:   []tls.CurveID{tls.X25519},
 		},
+		PubLisAddr:            msgLisAddr,
 		ChainMatrixConfigured: make(chan struct{}),
 	}
 
 	// Open up socket for eventual chain matrix
 	// election data from PKI.
-	node.PKIListener, err = net.Listen("tcp", pkiLisAddr)
+	node.PKIListener, err = net.Listen("tcp", node.PKILisAddr)
 	if err != nil {
-		fmt.Printf("Failed to listen for PKI information on socket %s: %v\n", pkiLisAddr, err)
+		fmt.Printf("Failed to listen for PKI information on socket %s: %v\n", node.PKILisAddr, err)
 		os.Exit(1)
 	}
 	defer node.PKIListener.Close()
+
+	// Start listening for incoming mix-net messages.
+	node.PubListener, err = net.Listen("tcp", node.PubLisAddr)
+	if err != nil {
+		fmt.Printf("Failed to listen for mix-net messages on socket %s: %v\n", node.PubLisAddr, err)
+		os.Exit(1)
+	}
+	defer node.PubListener.Close()
 
 	// Handle messages from PKI.
 	go node.HandlePKIMsgs()
@@ -130,14 +139,6 @@ func main() {
 		mix := &mixnet.Mix{
 			Node: node,
 		}
-
-		// Start listening for incoming mix-net messages.
-		mix.PubListener, err = net.Listen("tcp", msgLisAddr)
-		if err != nil {
-			fmt.Printf("Failed to listen for mix-net messages on socket %s: %v\n", msgLisAddr, err)
-			os.Exit(1)
-		}
-		defer mix.PubListener.Close()
 
 		for {
 

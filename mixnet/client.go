@@ -26,14 +26,10 @@ func (cl *Client) ReconnectToEntries() error {
 		}
 	}
 
-	fmt.Printf("Connecting to entry mixes now\n")
-
 	// Make space for the ones from this epoch.
 	cl.EntryConns = make([]*rpc.Mix, len(cl.ChainMatrix))
 
 	for chain := 0; chain < len(cl.ChainMatrix); chain++ {
-
-		fmt.Printf("\tEntry mix %s now\n", cl.ChainMatrix[chain][0].Addr)
 
 		// Connect to each entry mix over TCP.
 		conn, err := net.Dial("tcp", cl.ChainMatrix[chain][0].Addr)
@@ -59,16 +55,20 @@ func (cl *Client) ReconnectToEntries() error {
 	return nil
 }
 
+// OnionEncryptAndSend is the dedicated goroutine
+// run in parallel for all chains in the chain matrix.
+// A client uses this function to reverse-encrypt
+// a message for the assigned chain and send it off
+// to each respective entry mix.
 func (cl *Client) OnionEncryptAndSend(convoExitMsg []byte, chain int) {
 
-	fmt.Printf("Encrypting messages now\n")
+	fmt.Printf("Encrypting message now\n")
 
 	msg := convoExitMsg
 
 	// Going through chains in reverse, encrypt
-	// ConvoExitMsg symmetrically as content.
-	// Pack into ConvoMixMsg and prepend with
-	// used public key.
+	// ConvoExitMsg symmetrically as content. Pack
+	// into ConvoMixMsg and prepend with used public key.
 	for mix := (len(cl.ChainMatrix[chain]) - 1); mix > 0; mix-- {
 
 		// Use precomputed nonce and shared key to
@@ -99,15 +99,15 @@ func (cl *Client) OnionEncryptAndSend(convoExitMsg []byte, chain int) {
 			os.Exit(1)
 		}
 
-		fmt.Printf("len(msg) = %d", len(msg))
+		fmt.Printf("len(msg) = %d\n", len(msg))
 	}
 
-	fmt.Printf("Onionized message:\n'%#v'\nlen(finalMessage) = %d\n", msg, len(msg))
+	fmt.Printf("\nlen(finalMessage) = %d\n", len(msg))
 
-	// TODO: Send final layered message to entry mix.
-
+	// Send final layered message to entry mix.
 	status, err := cl.EntryConns[chain].AddConvoMsg(context.Background(), func(p rpc.Mix_addConvoMsg_Params) error {
 
+		// Create new entry message and set values.
 		entryConvoMixMsg, err := p.NewMsg()
 		if err != nil {
 			return err
@@ -123,18 +123,21 @@ func (cl *Client) OnionEncryptAndSend(convoExitMsg []byte, chain int) {
 		fmt.Printf("Error while sending onion-encrypted message to entry mix %s: %v\n", cl.ChainMatrix[chain][0].Addr, err)
 	}
 
-	fmt.Printf("\nReceived status reply: '%#v'\n", status)
+	if status.Status() != 0 {
+		fmt.Printf("Received error code %d from entry mix '%s'\n", status.Status(), cl.ChainMatrix[chain][0].Addr)
+	} else {
+		fmt.Printf("Successfully delivered message to entry mix '%s'\n", cl.ChainMatrix[chain][0].Addr)
+	}
 
 	cl.SendWG.Done()
 }
 
-// HandleMsgs is the main user input loop
-// on a zeno client. It accepts lines typed
-// by the user, times and pads them properly,
-// onion-encrypts and transmits them to each
-// cascade. If no user message is available
-// in a round, cover traffic is encrypted
-// and sent in its place.
+// HandleMsgs is the main user input loop on a
+// zeno client. It accepts lines typed by the user,
+// times and pads them properly, onion-encrypts
+// and transmits them to each cascade. If no
+// user message is available in a round, cover
+// traffic is encrypted and sent in its place.
 func (cl *Client) HandleMsgs() error {
 
 	tests := []string{
@@ -147,7 +150,7 @@ func (cl *Client) HandleMsgs() error {
 
 	for msg := range tests {
 
-		fmt.Printf("Handling messages now\n")
+		fmt.Printf("Handling a user message now\n")
 
 		// Prepare the needed new round state,
 		// primarily including fresh key material.
