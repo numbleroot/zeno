@@ -132,13 +132,13 @@ func (cl *Client) OnionEncryptAndSend(convoExitMsg []byte, chain int) {
 	cl.SendWG.Done()
 }
 
-// HandleMsgs is the main user input loop on a
+// SendMsg is the main user input loop on a
 // zeno client. It accepts lines typed by the user,
 // times and pads them properly, onion-encrypts
 // and transmits them to each cascade. If no
 // user message is available in a round, cover
 // traffic is encrypted and sent in its place.
-func (cl *Client) HandleMsgs() error {
+func (cl *Client) SendMsg() error {
 
 	tests := []string{
 		"Good morning, New York!",

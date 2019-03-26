@@ -33,6 +33,9 @@ type RoundClient struct {
 	MsgKeys [][]*OnionKeyPair
 }
 
+type RoundMix struct {
+}
+
 // Node collects the basic information
 // any node in our system works with.
 type Node struct {

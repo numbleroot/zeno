@@ -129,15 +129,44 @@ func main() {
 			os.Exit(1)
 		}
 
-		fmt.Printf("Waiting for chain matrix to configure...\n")
+	} else if isClient {
 
-		// Wait until chainMatrix has been built.
-		<-node.ChainMatrixConfigured
+		// Nodes that are regular clients in the
+		// system register with their address and
+		// receive public key at the PKI.
+		err = node.RegisterClient()
+		if err != nil {
+			fmt.Printf("Failed to register as client at PKI server: %v\n", err)
+			os.Exit(1)
+		}
+	}
 
-		fmt.Printf("Chain matrix configured.\n\n")
+	fmt.Printf("Waiting for chain matrix to configure...\n")
+
+	// Wait until chainMatrix has been built.
+	<-node.ChainMatrixConfigured
+
+	fmt.Printf("Chain matrix configured.\n\n")
+
+	elected := false
+
+	if isMix {
+
+		// TODO: Figure out whether the mix intent of this
+		//       node resulted in it getting elected.
+		elected = true
+	}
+
+	if elected {
 
 		mix := &mixnet.Mix{
 			Node: node,
+		}
+
+		err = mix.AddCoverMsgsToPool()
+		if err != nil {
+			fmt.Printf("Failed generating cover traffic messages for pool: %v\n", err)
+			os.Exit(1)
 		}
 
 		for {
@@ -152,23 +181,16 @@ func main() {
 			go mix.HandleMsg(conn)
 		}
 
-	} else if isClient {
+	} else {
 
-		// Nodes that are regular clients in the
-		// system register with their address and
-		// receive public key at the PKI.
-		err = node.RegisterClient()
-		if err != nil {
-			fmt.Printf("Failed to register as client at PKI server: %v\n", err)
-			os.Exit(1)
+		if !isClient {
+
+			err = node.RegisterClient()
+			if err != nil {
+				fmt.Printf("Failed to register as client at PKI server: %v\n", err)
+				os.Exit(1)
+			}
 		}
-
-		fmt.Printf("Waiting for chain matrix to configure...\n")
-
-		// Wait until chainMatrix has been built.
-		<-node.ChainMatrixConfigured
-
-		fmt.Printf("Chain matrix configured.\n\n")
 
 		client := &mixnet.Client{
 			Node:   node,
@@ -176,13 +198,13 @@ func main() {
 		}
 
 		// Connect to all entry mixes in chainMatrix.
-		err := client.ReconnectToEntries()
+		err = client.ReconnectToEntries()
 		if err != nil {
 			fmt.Printf("Error while connecting to entry mixes: %v\n", err)
 		}
 
 		// Handle messaging loop.
-		err = client.HandleMsgs()
+		err = client.SendMsg()
 		if err != nil {
 			fmt.Printf("Error while running client: %v\n", err)
 		}

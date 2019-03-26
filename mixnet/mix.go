@@ -8,6 +8,11 @@ import (
 	capnprpc "zombiezen.com/go/capnproto2/rpc"
 )
 
+func (mix *Mix) AddCoverMsgsToPool() error {
+
+	return nil
+}
+
 func (mix *Mix) AddBatch(call rpc.Mix_addBatch) error {
 
 	data, err := call.Params.Batch()
