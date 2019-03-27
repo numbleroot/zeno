@@ -43,37 +43,6 @@ func (mix *Mix) AddCoverMsgsToPool() error {
 		}
 		chosen := int(chosenBig.Int64())
 
-		// Prepare key chain for this participant.
-		keys := make([]*OnionKeyState, numMixesToEnd)
-
-		for otherMix := 0; otherMix < numMixesToEnd; otherMix++ {
-
-			keys[otherMix] = &OnionKeyState{
-				Nonce:  new([24]byte),
-				PubKey: new([32]byte),
-				SymKey: new([32]byte),
-			}
-
-			// Create new random nonce.
-			_, err = io.ReadFull(rand.Reader, keys[otherMix].Nonce[:])
-			if err != nil {
-				return err
-			}
-
-			// Generate public-private key pair.
-			msgSecKey := new([32]byte)
-			keys[otherMix].PubKey, msgSecKey, err = box.GenerateKey(rand.Reader)
-			if err != nil {
-				return err
-			}
-
-			origIdx := mix.OwnIndex + otherMix + 1
-
-			// Calculate shared key between ephemeral
-			// secret key and receive public key of each mix.
-			box.Precompute(keys[otherMix].SymKey, mix.ChainMatrix[mix.OwnChain][origIdx].PubKey, msgSecKey)
-		}
-
 		// Prepare mostly random cover message.
 		msgPadded := new([280]byte)
 		_, err = io.ReadFull(rand.Reader, msgPadded[:])
@@ -96,26 +65,102 @@ func (mix *Mix) AddCoverMsgsToPool() error {
 		convoExitMsg.SetClientAddr(mix.KnownClients[chosen].Addr)
 		convoExitMsg.SetContent(msgPadded[:])
 
-		// Marshal final ConvoExitMsg to byte slice.
-		msg, err := protoMsg.Marshal()
-		if err != nil {
-			return err
-		}
+		if mix.IsExit {
 
-		fmt.Printf("len(convoExitMsg) = %d\n", len(msg))
+			// This is an exit mix, thus simply add the
+			// cover message directly to message pool in
+			// first time slot.
+			mix.ExitMsgsByIncWait[0] = append(mix.ExitMsgsByIncWait[0], &convoExitMsg)
 
-		// Going through chains in reverse, encrypt
-		// ConvoExitMsg symmetrically as content. Pack
-		// into ConvoMixMsg and prepend with used public
-		// key and nonce.
-		for mix := (len(keys) - 1); mix > 0; mix-- {
+		} else {
+
+			// This is not an exit mix, thus we
+			// want to onion-encrypt. Prepare key
+			// material.
+
+			// Prepare key chain for this participant.
+			keys := make([]*OnionKeyState, numMixesToEnd)
+
+			for otherMix := 0; otherMix < numMixesToEnd; otherMix++ {
+
+				keys[otherMix] = &OnionKeyState{
+					Nonce:  new([24]byte),
+					PubKey: new([32]byte),
+					SymKey: new([32]byte),
+				}
+
+				// Create new random nonce.
+				_, err = io.ReadFull(rand.Reader, keys[otherMix].Nonce[:])
+				if err != nil {
+					return err
+				}
+
+				// Generate public-private key pair.
+				msgSecKey := new([32]byte)
+				keys[otherMix].PubKey, msgSecKey, err = box.GenerateKey(rand.Reader)
+				if err != nil {
+					return err
+				}
+
+				origIdx := mix.OwnIndex + otherMix + 1
+
+				// Calculate shared key between ephemeral
+				// secret key and receive public key of each mix.
+				box.Precompute(keys[otherMix].SymKey, mix.ChainMatrix[mix.OwnChain][origIdx].PubKey, msgSecKey)
+			}
+
+			// Marshal final ConvoExitMsg to byte slice.
+			msg, err := protoMsg.Marshal()
+			if err != nil {
+				return err
+			}
+
+			fmt.Printf("len(convoExitMsg) = %d\n", len(msg))
+
+			// Going through chains in reverse, encrypt
+			// ConvoExitMsg symmetrically as content. Pack
+			// into ConvoMixMsg and prepend with used public
+			// key and nonce.
+			for mix := (len(keys) - 1); mix > 0; mix-- {
+
+				// Use precomputed nonce and shared key to
+				// symmetrically encrypt the current message.
+				encMsg := box.SealAfterPrecomputation(keys[mix].Nonce[:], msg, keys[mix].Nonce, keys[mix].SymKey)
+
+				// Create empty Cap'n Proto messsage.
+				protoMsg, protoMsgSeg, err := capnp.NewMessage(capnp.SingleSegment(nil))
+				if err != nil {
+					fmt.Printf("Failed creating empty Cap'n Proto message: %v\n", err)
+					os.Exit(1)
+				}
+
+				// Create new ConvoMixMsg and insert values.
+				convoMixMsg, err := rpc.NewRootConvoMixMsg(protoMsgSeg)
+				if err != nil {
+					fmt.Printf("Failed creating new root ConvoMixMsg: %v\n", err)
+					os.Exit(1)
+				}
+				convoMixMsg.SetPubKey(keys[mix].PubKey[:])
+				convoMixMsg.SetNonce(keys[mix].Nonce[:])
+				convoMixMsg.SetContent(encMsg)
+
+				// Marshal final ConvoMixMsg to byte slice.
+				msg, err = protoMsg.Marshal()
+				if err != nil {
+					fmt.Printf("Failed marshalling final ConvoMixMsg to []byte: %v\n", err)
+					os.Exit(1)
+				}
+
+				fmt.Printf("len(msg) = %d\n", len(msg))
+			}
 
 			// Use precomputed nonce and shared key to
-			// symmetrically encrypt the current message.
-			encMsg := box.SealAfterPrecomputation(keys[mix].Nonce[:], msg, keys[mix].Nonce, keys[mix].SymKey)
+			// symmetrically encrypt the current message
+			// finally for the subsequent of the current mix.
+			encMsg := box.SealAfterPrecomputation(keys[0].Nonce[:], msg, keys[0].Nonce, keys[0].SymKey)
 
 			// Create empty Cap'n Proto messsage.
-			protoMsg, protoMsgSeg, err := capnp.NewMessage(capnp.SingleSegment(nil))
+			protoMsg, protoMsgSeg, err = capnp.NewMessage(capnp.SingleSegment(nil))
 			if err != nil {
 				fmt.Printf("Failed creating empty Cap'n Proto message: %v\n", err)
 				os.Exit(1)
@@ -127,44 +172,13 @@ func (mix *Mix) AddCoverMsgsToPool() error {
 				fmt.Printf("Failed creating new root ConvoMixMsg: %v\n", err)
 				os.Exit(1)
 			}
-			convoMixMsg.SetPubKey(keys[mix].PubKey[:])
-			convoMixMsg.SetNonce(keys[mix].Nonce[:])
+			convoMixMsg.SetPubKey(keys[0].PubKey[:])
+			convoMixMsg.SetNonce(keys[0].Nonce[:])
 			convoMixMsg.SetContent(encMsg)
 
-			// Marshal final ConvoMixMsg to byte slice.
-			msg, err = protoMsg.Marshal()
-			if err != nil {
-				fmt.Printf("Failed marshalling final ConvoMixMsg to []byte: %v\n", err)
-				os.Exit(1)
-			}
-
-			fmt.Printf("len(msg) = %d\n", len(msg))
+			// Add layered ConvoMixMsg to pool in first time slot.
+			mix.MixMsgsByIncWait[0] = append(mix.MixMsgsByIncWait[0], &convoMixMsg)
 		}
-
-		// Use precomputed nonce and shared key to
-		// symmetrically encrypt the current message
-		// finally for the subsequent of the current mix.
-		encMsg := box.SealAfterPrecomputation(keys[0].Nonce[:], msg, keys[0].Nonce, keys[0].SymKey)
-
-		// Create empty Cap'n Proto messsage.
-		protoMsg, protoMsgSeg, err = capnp.NewMessage(capnp.SingleSegment(nil))
-		if err != nil {
-			fmt.Printf("Failed creating empty Cap'n Proto message: %v\n", err)
-			os.Exit(1)
-		}
-
-		// Create new ConvoMixMsg and insert values.
-		convoMixMsg, err := rpc.NewRootConvoMixMsg(protoMsgSeg)
-		if err != nil {
-			fmt.Printf("Failed creating new root ConvoMixMsg: %v\n", err)
-			os.Exit(1)
-		}
-		convoMixMsg.SetPubKey(keys[0].PubKey[:])
-		convoMixMsg.SetNonce(keys[0].Nonce[:])
-		convoMixMsg.SetContent(encMsg)
-
-		// Add layered ConvoMixMsg to pool in first time slot.
-		mix.MsgPoolsByIncWait[0] = append(mix.MsgPoolsByIncWait[0], &convoMixMsg)
 	}
 
 	return nil

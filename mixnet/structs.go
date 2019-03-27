@@ -58,5 +58,8 @@ type Mix struct {
 	*Node
 	OwnChain          int
 	OwnIndex          int
-	MsgPoolsByIncWait [][]*rpc.ConvoMixMsg
+	IsEntry           bool
+	IsExit            bool
+	MixMsgsByIncWait  [][]*rpc.ConvoMixMsg
+	ExitMsgsByIncWait [][]*rpc.ConvoExitMsg
 }

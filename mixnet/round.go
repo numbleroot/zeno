@@ -61,23 +61,6 @@ func (cl *Client) InitNewRound() error {
 // for incoming messages.
 func (mix *Mix) InitNewRound() error {
 
-	if len(mix.MsgPoolsByIncWait) < 3 {
-
-		// Initialize message pools in case they
-		// do not yet exist (e.g., in first round).
-		mix.MsgPoolsByIncWait = make([][]*rpc.ConvoMixMsg, 3)
-
-	} else {
-
-		for i := (len(mix.MsgPoolsByIncWait) - 1); i >= 0; i-- {
-
-			// Move message pools from previous rounds
-			// up in list of message pools sorted by
-			// increasing delayed rounds.
-			mix.MsgPoolsByIncWait[i] = mix.MsgPoolsByIncWait[(i - 1)]
-		}
-	}
-
 	numClients := len(mix.KnownClients)
 	numSamples := numClients / 10
 	if numSamples < 100 {
@@ -85,11 +68,56 @@ func (mix *Mix) InitNewRound() error {
 	}
 	maxNumMsg := numClients + numSamples + 10
 
-	// Prepare space in first pool for round
-	// that is about to start to already offer
-	// a rough approximation of the expected
-	// total number of messages in that round.
-	mix.MsgPoolsByIncWait[0] = make([]*rpc.ConvoMixMsg, 0, maxNumMsg)
+	if mix.IsExit {
+
+		if len(mix.ExitMsgsByIncWait) < 3 {
+
+			// Initialize message pools in case they
+			// do not yet exist (e.g., in first round).
+			mix.ExitMsgsByIncWait = make([][]*rpc.ConvoExitMsg, 3)
+
+		} else {
+
+			for i := (len(mix.ExitMsgsByIncWait) - 1); i >= 0; i-- {
+
+				// Move message pools from previous rounds
+				// up in list of message pools sorted by
+				// increasing delayed rounds.
+				mix.ExitMsgsByIncWait[i] = mix.ExitMsgsByIncWait[(i - 1)]
+			}
+		}
+
+		// Prepare space in first pool for round
+		// that is about to start to already offer
+		// a rough approximation of the expected
+		// total number of messages in that round.
+		mix.ExitMsgsByIncWait[0] = make([]*rpc.ConvoExitMsg, 0, maxNumMsg)
+
+	} else {
+
+		if len(mix.MixMsgsByIncWait) < 3 {
+
+			// Initialize message pools in case they
+			// do not yet exist (e.g., in first round).
+			mix.MixMsgsByIncWait = make([][]*rpc.ConvoMixMsg, 3)
+
+		} else {
+
+			for i := (len(mix.MixMsgsByIncWait) - 1); i >= 0; i-- {
+
+				// Move message pools from previous rounds
+				// up in list of message pools sorted by
+				// increasing delayed rounds.
+				mix.MixMsgsByIncWait[i] = mix.MixMsgsByIncWait[(i - 1)]
+			}
+		}
+
+		// Prepare space in first pool for round
+		// that is about to start to already offer
+		// a rough approximation of the expected
+		// total number of messages in that round.
+		mix.MixMsgsByIncWait[0] = make([]*rpc.ConvoMixMsg, 0, maxNumMsg)
+	}
 
 	// Add basis of cover traffic to first pool.
 	err := mix.AddCoverMsgsToPool()
