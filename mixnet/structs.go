@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/numbleroot/zeno/rpc"
 )
@@ -60,6 +61,7 @@ type Mix struct {
 	OwnIndex          int
 	IsEntry           bool
 	IsExit            bool
+	RoundTicker       time.Ticker
 	MixMsgsByIncWait  [][]*rpc.ConvoMixMsg
 	ExitMsgsByIncWait [][]*rpc.ConvoExitMsg
 }

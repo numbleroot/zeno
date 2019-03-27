@@ -221,6 +221,9 @@ func (mix *Mix) AddConvoMsg(call rpc.Mix_addConvoMsg) error {
 	return nil
 }
 
+// HandleMsg accepts incoming Cap'n Proto
+// messages, constructs appropriate wrappers,
+// and handles the request.
 func (mix *Mix) HandleMsg(c net.Conn) {
 
 	main := rpc.Mix_ServerToClient(mix)

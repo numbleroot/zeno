@@ -187,7 +187,7 @@ func main() {
 		// Determine this mix' place in chain matrix.
 		mix.SetOwnPlace()
 
-		fmt.Printf("Own chain: %d, own index on chain: %d, is entry? %v, is exit? %v\n", mix.OwnChain, mix.OwnIndex, mix.IsEntry, mix.IsExit)
+		fmt.Printf("Own chain: %d, own index on chain: %d, is entry? %v, is exit? %v\n\n", mix.OwnChain, mix.OwnIndex, mix.IsEntry, mix.IsExit)
 
 		// Initialize state on mix for upcoming round.
 		err = mix.InitNewRound()
