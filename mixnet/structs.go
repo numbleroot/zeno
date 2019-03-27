@@ -16,21 +16,14 @@ type Endpoint struct {
 	PubKey *[32]byte
 }
 
-// OnionKeyPair collects the keys we need
+// OnionKeyState collects the keys we need
 // for an onion-encrypted message: the PubKey
 // to prepend to the ciphertext symmetrically
 // encrypted with SymKey.
-type OnionKeyPair struct {
+type OnionKeyState struct {
+	Nonce  *[24]byte
 	PubKey *[32]byte
 	SymKey *[32]byte
-}
-
-// RoundClient bundles all objects
-// required for a client to participate
-// in a zeno round.
-type RoundClient struct {
-	Nonce   *[24]byte
-	MsgKeys [][]*OnionKeyPair
 }
 
 // Node collects the basic information
@@ -55,8 +48,8 @@ type Client struct {
 	*Node
 	SendWG     *sync.WaitGroup
 	EntryConns []*rpc.Mix
-	CurRound   *RoundClient
-	PrevRound  *RoundClient
+	CurRound   [][]*OnionKeyState
+	PrevRound  [][]*OnionKeyState
 }
 
 // Mix represents a mix node in our
@@ -64,6 +57,6 @@ type Client struct {
 type Mix struct {
 	*Node
 	IsEntry           bool
-	OnChain           int
+	OwnChain          int
 	MsgPoolsByIncWait []*[]rpc.ConvoMixMsg
 }

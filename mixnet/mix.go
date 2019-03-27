@@ -3,10 +3,14 @@ package mixnet
 import (
 	"crypto/rand"
 	"fmt"
+	"io"
 	"math/big"
 	"net"
+	"os"
 
 	"github.com/numbleroot/zeno/rpc"
+	"golang.org/x/crypto/nacl/box"
+	capnp "zombiezen.com/go/capnproto2"
 	capnprpc "zombiezen.com/go/capnproto2/rpc"
 )
 
@@ -21,39 +25,125 @@ func (mix *Mix) AddCoverMsgsToPool() error {
 
 	// Determine number of clients and
 	// respective sample size.
-	numClients := int64(len(mix.KnownClients))
+	numClients := len(mix.KnownClients)
 	numSamples := numClients / 10
 	if numSamples < 100 {
 		numSamples = numClients
 	}
 
-	recipients := make([]*Endpoint, numSamples)
-
 	// Randomly select k clients to generate
 	// cover messages to.
-	for i := range recipients {
+	for i := 0; i < numSamples; i++ {
 
 		// Select a user index uniformly at random.
-		chosenBig, err := rand.Int(rand.Reader, big.NewInt(numClients))
+		chosenBig, err := rand.Int(rand.Reader, big.NewInt(int64(numClients)))
 		if err != nil {
 			return err
 		}
-		chosen := chosenBig.Int64()
+		chosen := int(chosenBig.Int64())
 
-		// Incorporate client chosen by CSPRNG
-		// into list of recipients.
-		recipients[i] = mix.KnownClients[chosen]
+		// Prepare key chain for this participant.
+		keys := make([]*OnionKeyState, (len(mix.ChainMatrix[mix.OwnChain]) - 1))
+
+		for otherMix := 0; otherMix < (len(mix.ChainMatrix[mix.OwnChain]) - 1); otherMix++ {
+
+			keys[otherMix] = &OnionKeyState{
+				Nonce:  new([24]byte),
+				PubKey: new([32]byte),
+				SymKey: new([32]byte),
+			}
+
+			// Create new random nonce.
+			_, err = io.ReadFull(rand.Reader, keys[otherMix].Nonce[:])
+			if err != nil {
+				return err
+			}
+
+			// Generate public-private key pair.
+			msgSecKey := new([32]byte)
+			keys[otherMix].PubKey, msgSecKey, err = box.GenerateKey(rand.Reader)
+			if err != nil {
+				return err
+			}
+
+			// Calculate shared key between ephemeral
+			// secret key and receive public key of each mix.
+			box.Precompute(keys[otherMix].SymKey, mix.ChainMatrix[mix.OwnChain][(otherMix+1)].PubKey, msgSecKey)
+		}
+
+		// Prepare mostly random cover message.
+		msgPadded := new([280]byte)
+		_, err = io.ReadFull(rand.Reader, msgPadded[:])
+		if err != nil {
+			return err
+		}
+		copy(msgPadded[:], "COVER MESSAGE, PLEASE DISCARD")
+
+		// Create empty Cap'n Proto messsage.
+		protoMsg, protoMsgSeg, err := capnp.NewMessage(capnp.SingleSegment(nil))
+		if err != nil {
+			return err
+		}
+
+		// Fill ConvoExitMsg.
+		convoExitMsg, err := rpc.NewRootConvoExitMsg(protoMsgSeg)
+		if err != nil {
+			return err
+		}
+		convoExitMsg.SetClientAddr(mix.KnownClients[chosen].Addr)
+		convoExitMsg.SetContent(msgPadded[:])
+
+		// Marshal final ConvoExitMsg to byte slice.
+		protoMsgBytes, err := protoMsg.Marshal()
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("len(convoExitMsg) = %d\n", len(protoMsgBytes))
+
+		msg := convoExitMsg
+
+		// Going through chains in reverse, encrypt
+		// ConvoExitMsg symmetrically as content. Pack
+		// into ConvoMixMsg and prepend with used public
+		// key and nonce.
+		for mix := (len(cl.ChainMatrix[chain]) - 1); mix > 0; mix-- {
+
+			// Use precomputed nonce and shared key to
+			// symmetrically encrypt the current message.
+			encMsg := box.SealAfterPrecomputation(cl.CurRound[chain][mix].Nonce[:], msg, cl.CurRound[chain][mix].Nonce, cl.CurRound[chain][mix].SymKey)
+
+			// Create empty Cap'n Proto messsage.
+			protoMsg, protoMsgSeg, err := capnp.NewMessage(capnp.SingleSegment(nil))
+			if err != nil {
+				fmt.Printf("Failed creating empty Cap'n Proto message: %v\n", err)
+				os.Exit(1)
+			}
+
+			// Create new ConvoMixMsg and insert values.
+			convoMixMsg, err := rpc.NewRootConvoMixMsg(protoMsgSeg)
+			if err != nil {
+				fmt.Printf("Failed creating new root ConvoMixMsg: %v\n", err)
+				os.Exit(1)
+			}
+			convoMixMsg.SetPubKey(cl.CurRound[chain][mix].PubKey[:])
+			convoMixMsg.SetNonce(cl.CurRound[chain][mix].Nonce[:])
+			convoMixMsg.SetContent(encMsg)
+
+			// Marshal final ConvoMixMsg to byte slice.
+			msg, err = protoMsg.Marshal()
+			if err != nil {
+				fmt.Printf("Failed marshalling final ConvoMixMsg to []byte: %v\n", err)
+				os.Exit(1)
+			}
+
+			fmt.Printf("len(msg) = %d\n", len(msg))
+		}
+
+		fmt.Printf("\nlen(finalMessage) = %d\n", len(msg))
+
+		// TODO: Add layered ConvoMixMsg to pool in first time slot.
 	}
-
-	// TODO: Construct symmetric keys to recipients.
-
-	// TODO: For each recipient:
-
-	//       TODO: Generate ConvoExitMsg with random message.
-
-	//       TODO: Onion-encrypt created msg in ConvoMixMsgs.
-
-	//       TODO: Add layered ConvoMixMsg to pool in first time slot.
 
 	return nil
 }

@@ -68,12 +68,13 @@ func (cl *Client) OnionEncryptAndSend(convoExitMsg []byte, chain int) {
 
 	// Going through chains in reverse, encrypt
 	// ConvoExitMsg symmetrically as content. Pack
-	// into ConvoMixMsg and prepend with used public key.
+	// into ConvoMixMsg and prepend with used public
+	// key and nonce.
 	for mix := (len(cl.ChainMatrix[chain]) - 1); mix > 0; mix-- {
 
 		// Use precomputed nonce and shared key to
 		// symmetrically encrypt the current message.
-		encMsg := box.SealAfterPrecomputation(cl.CurRound.Nonce[:], msg, cl.CurRound.Nonce, cl.CurRound.MsgKeys[chain][mix].SymKey)
+		encMsg := box.SealAfterPrecomputation(cl.CurRound[chain][mix].Nonce[:], msg, cl.CurRound[chain][mix].Nonce, cl.CurRound[chain][mix].SymKey)
 
 		// Create empty Cap'n Proto messsage.
 		protoMsg, protoMsgSeg, err := capnp.NewMessage(capnp.SingleSegment(nil))
@@ -88,8 +89,8 @@ func (cl *Client) OnionEncryptAndSend(convoExitMsg []byte, chain int) {
 			fmt.Printf("Failed creating new root ConvoMixMsg: %v\n", err)
 			os.Exit(1)
 		}
-		convoMixMsg.SetPubKey(cl.CurRound.MsgKeys[chain][mix].PubKey[:])
-		convoMixMsg.SetNonce(cl.CurRound.Nonce[:])
+		convoMixMsg.SetPubKey(cl.CurRound[chain][mix].PubKey[:])
+		convoMixMsg.SetNonce(cl.CurRound[chain][mix].Nonce[:])
 		convoMixMsg.SetContent(encMsg)
 
 		// Marshal final ConvoMixMsg to byte slice.
@@ -112,8 +113,8 @@ func (cl *Client) OnionEncryptAndSend(convoExitMsg []byte, chain int) {
 		if err != nil {
 			return err
 		}
-		entryConvoMixMsg.SetPubKey(cl.CurRound.MsgKeys[chain][0].PubKey[:])
-		entryConvoMixMsg.SetNonce(cl.CurRound.Nonce[:])
+		entryConvoMixMsg.SetPubKey(cl.CurRound[chain][0].PubKey[:])
+		entryConvoMixMsg.SetNonce(cl.CurRound[chain][0].Nonce[:])
 		entryConvoMixMsg.SetContent(msg)
 
 		return nil
