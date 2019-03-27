@@ -184,9 +184,8 @@ func main() {
 			Node: node,
 		}
 
-		// Generate cover messages to random genuine
-		// clients in order to prevent n - 1 attack.
-		err = mix.AddCoverMsgsToPool()
+		// Initialize state on mix for upcoming round.
+		err = mix.InitNewRound()
 		if err != nil {
 			fmt.Printf("Failed generating cover traffic messages for pool: %v\n", err)
 			os.Exit(1)

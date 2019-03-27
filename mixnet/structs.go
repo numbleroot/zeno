@@ -56,7 +56,7 @@ type Client struct {
 // system architecture.
 type Mix struct {
 	*Node
-	IsEntry           bool
 	OwnChain          int
-	MsgPoolsByIncWait []*[]rpc.ConvoMixMsg
+	OwnIndex          int
+	MsgPoolsByIncWait [][]*rpc.ConvoMixMsg
 }

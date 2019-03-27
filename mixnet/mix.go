@@ -26,6 +26,7 @@ func (mix *Mix) AddCoverMsgsToPool() error {
 	// Determine number of clients and
 	// respective sample size.
 	numClients := len(mix.KnownClients)
+	numMixesToEnd := len(mix.ChainMatrix[mix.OwnChain]) - (mix.OwnIndex + 1)
 	numSamples := numClients / 10
 	if numSamples < 100 {
 		numSamples = numClients
@@ -43,9 +44,9 @@ func (mix *Mix) AddCoverMsgsToPool() error {
 		chosen := int(chosenBig.Int64())
 
 		// Prepare key chain for this participant.
-		keys := make([]*OnionKeyState, (len(mix.ChainMatrix[mix.OwnChain]) - 1))
+		keys := make([]*OnionKeyState, numMixesToEnd)
 
-		for otherMix := 0; otherMix < (len(mix.ChainMatrix[mix.OwnChain]) - 1); otherMix++ {
+		for otherMix := 0; otherMix < numMixesToEnd; otherMix++ {
 
 			keys[otherMix] = &OnionKeyState{
 				Nonce:  new([24]byte),
@@ -66,9 +67,11 @@ func (mix *Mix) AddCoverMsgsToPool() error {
 				return err
 			}
 
+			origIdx := mix.OwnIndex + otherMix + 1
+
 			// Calculate shared key between ephemeral
 			// secret key and receive public key of each mix.
-			box.Precompute(keys[otherMix].SymKey, mix.ChainMatrix[mix.OwnChain][(otherMix+1)].PubKey, msgSecKey)
+			box.Precompute(keys[otherMix].SymKey, mix.ChainMatrix[mix.OwnChain][origIdx].PubKey, msgSecKey)
 		}
 
 		// Prepare mostly random cover message.
@@ -94,24 +97,22 @@ func (mix *Mix) AddCoverMsgsToPool() error {
 		convoExitMsg.SetContent(msgPadded[:])
 
 		// Marshal final ConvoExitMsg to byte slice.
-		protoMsgBytes, err := protoMsg.Marshal()
+		msg, err := protoMsg.Marshal()
 		if err != nil {
 			return err
 		}
 
-		fmt.Printf("len(convoExitMsg) = %d\n", len(protoMsgBytes))
-
-		msg := convoExitMsg
+		fmt.Printf("len(convoExitMsg) = %d\n", len(msg))
 
 		// Going through chains in reverse, encrypt
 		// ConvoExitMsg symmetrically as content. Pack
 		// into ConvoMixMsg and prepend with used public
 		// key and nonce.
-		for mix := (len(cl.ChainMatrix[chain]) - 1); mix > 0; mix-- {
+		for mix := (len(keys) - 1); mix > 0; mix-- {
 
 			// Use precomputed nonce and shared key to
 			// symmetrically encrypt the current message.
-			encMsg := box.SealAfterPrecomputation(cl.CurRound[chain][mix].Nonce[:], msg, cl.CurRound[chain][mix].Nonce, cl.CurRound[chain][mix].SymKey)
+			encMsg := box.SealAfterPrecomputation(keys[mix].Nonce[:], msg, keys[mix].Nonce, keys[mix].SymKey)
 
 			// Create empty Cap'n Proto messsage.
 			protoMsg, protoMsgSeg, err := capnp.NewMessage(capnp.SingleSegment(nil))
@@ -126,8 +127,8 @@ func (mix *Mix) AddCoverMsgsToPool() error {
 				fmt.Printf("Failed creating new root ConvoMixMsg: %v\n", err)
 				os.Exit(1)
 			}
-			convoMixMsg.SetPubKey(cl.CurRound[chain][mix].PubKey[:])
-			convoMixMsg.SetNonce(cl.CurRound[chain][mix].Nonce[:])
+			convoMixMsg.SetPubKey(keys[mix].PubKey[:])
+			convoMixMsg.SetNonce(keys[mix].Nonce[:])
 			convoMixMsg.SetContent(encMsg)
 
 			// Marshal final ConvoMixMsg to byte slice.
@@ -140,9 +141,30 @@ func (mix *Mix) AddCoverMsgsToPool() error {
 			fmt.Printf("len(msg) = %d\n", len(msg))
 		}
 
-		fmt.Printf("\nlen(finalMessage) = %d\n", len(msg))
+		// Use precomputed nonce and shared key to
+		// symmetrically encrypt the current message
+		// finally for the subsequent of the current mix.
+		encMsg := box.SealAfterPrecomputation(keys[0].Nonce[:], msg, keys[0].Nonce, keys[0].SymKey)
 
-		// TODO: Add layered ConvoMixMsg to pool in first time slot.
+		// Create empty Cap'n Proto messsage.
+		protoMsg, protoMsgSeg, err = capnp.NewMessage(capnp.SingleSegment(nil))
+		if err != nil {
+			fmt.Printf("Failed creating empty Cap'n Proto message: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Create new ConvoMixMsg and insert values.
+		convoMixMsg, err := rpc.NewRootConvoMixMsg(protoMsgSeg)
+		if err != nil {
+			fmt.Printf("Failed creating new root ConvoMixMsg: %v\n", err)
+			os.Exit(1)
+		}
+		convoMixMsg.SetPubKey(keys[0].PubKey[:])
+		convoMixMsg.SetNonce(keys[0].Nonce[:])
+		convoMixMsg.SetContent(encMsg)
+
+		// Add layered ConvoMixMsg to pool in first time slot.
+		mix.MsgPoolsByIncWait[0] = append(mix.MsgPoolsByIncWait[0], &convoMixMsg)
 	}
 
 	return nil
