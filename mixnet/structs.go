@@ -57,11 +57,18 @@ type Client struct {
 // system architecture.
 type Mix struct {
 	*Node
-	OwnChain          int
-	OwnIndex          int
-	IsEntry           bool
-	IsExit            bool
-	RoundTicker       time.Ticker
-	MixMsgsByIncWait  [][]*rpc.ConvoMixMsg
-	ExitMsgsByIncWait [][]*rpc.ConvoExitMsg
+	OwnChain      int
+	OwnIndex      int
+	IsEntry       bool
+	IsExit        bool
+	RoundTimer    *time.Timer
+	muFirstPool   *sync.Mutex
+	FirstPoolMix  []*rpc.ConvoMixMsg
+	FirstPoolExit []*rpc.ConvoExitMsg
+	SecPoolMix    []*rpc.ConvoMixMsg
+	SecPoolExit   []*rpc.ConvoExitMsg
+	ThirdPoolMix  []*rpc.ConvoMixMsg
+	ThirdPoolExit []*rpc.ConvoExitMsg
+	NextPoolMix   []*rpc.ConvoMixMsg
+	NextPoolExit  []*rpc.ConvoExitMsg
 }

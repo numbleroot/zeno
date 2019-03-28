@@ -3,10 +3,6 @@ using Go = import "/go.capnp";
 $Go.package("rpc");
 $Go.import("github.com/numbleroot/zeno/rpc");
 
-struct MixnetConfig {
-    secondsToNextRound @0 :UInt16;
-}
-
 struct ConvoExitMsg {
     clientAddr @0 :Text;
     content @1 :Data;
@@ -23,7 +19,6 @@ struct Batch {
 }
 
 interface Mix {
-    getMixnetConfig @0 () -> (meta :MixnetConfig);
-    addConvoMsg @1 (msg :ConvoMixMsg) -> (status :UInt8);
-    addBatch @2 (batch :Batch) -> (status :UInt8);
+    addConvoMsg @0 (msg :ConvoMixMsg) -> (status :UInt8);
+    addBatch @1 (batch :Batch) -> (status :UInt8);
 }

@@ -10,65 +10,6 @@ import (
 	server "zombiezen.com/go/capnproto2/server"
 )
 
-type MixnetConfig struct{ capnp.Struct }
-
-// MixnetConfig_TypeID is the unique identifier for the type MixnetConfig.
-const MixnetConfig_TypeID = 0x95896509ee825aa6
-
-func NewMixnetConfig(s *capnp.Segment) (MixnetConfig, error) {
-	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 0})
-	return MixnetConfig{st}, err
-}
-
-func NewRootMixnetConfig(s *capnp.Segment) (MixnetConfig, error) {
-	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 0})
-	return MixnetConfig{st}, err
-}
-
-func ReadRootMixnetConfig(msg *capnp.Message) (MixnetConfig, error) {
-	root, err := msg.RootPtr()
-	return MixnetConfig{root.Struct()}, err
-}
-
-func (s MixnetConfig) String() string {
-	str, _ := text.Marshal(0x95896509ee825aa6, s.Struct)
-	return str
-}
-
-func (s MixnetConfig) SecondsToNextRound() uint16 {
-	return s.Struct.Uint16(0)
-}
-
-func (s MixnetConfig) SetSecondsToNextRound(v uint16) {
-	s.Struct.SetUint16(0, v)
-}
-
-// MixnetConfig_List is a list of MixnetConfig.
-type MixnetConfig_List struct{ capnp.List }
-
-// NewMixnetConfig creates a new list of MixnetConfig.
-func NewMixnetConfig_List(s *capnp.Segment, sz int32) (MixnetConfig_List, error) {
-	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 8, PointerCount: 0}, sz)
-	return MixnetConfig_List{l}, err
-}
-
-func (s MixnetConfig_List) At(i int) MixnetConfig { return MixnetConfig{s.List.Struct(i)} }
-
-func (s MixnetConfig_List) Set(i int, v MixnetConfig) error { return s.List.SetStruct(i, v.Struct) }
-
-func (s MixnetConfig_List) String() string {
-	str, _ := text.MarshalList(0x95896509ee825aa6, s.List)
-	return str
-}
-
-// MixnetConfig_Promise is a wrapper for a MixnetConfig promised by a client call.
-type MixnetConfig_Promise struct{ *capnp.Pipeline }
-
-func (p MixnetConfig_Promise) Struct() (MixnetConfig, error) {
-	s, err := p.Pipeline.Struct()
-	return MixnetConfig{s}, err
-}
-
 type ConvoExitMsg struct{ capnp.Struct }
 
 // ConvoExitMsg_TypeID is the unique identifier for the type ConvoExitMsg.
@@ -327,26 +268,6 @@ type Mix struct{ Client capnp.Client }
 // Mix_TypeID is the unique identifier for the type Mix.
 const Mix_TypeID = 0xe5c2bb103bbd5250
 
-func (c Mix) GetMixnetConfig(ctx context.Context, params func(Mix_getMixnetConfig_Params) error, opts ...capnp.CallOption) Mix_getMixnetConfig_Results_Promise {
-	if c.Client == nil {
-		return Mix_getMixnetConfig_Results_Promise{Pipeline: capnp.NewPipeline(capnp.ErrorAnswer(capnp.ErrNullClient))}
-	}
-	call := &capnp.Call{
-		Ctx: ctx,
-		Method: capnp.Method{
-			InterfaceID:   0xe5c2bb103bbd5250,
-			MethodID:      0,
-			InterfaceName: "rpc/mix.capnp:Mix",
-			MethodName:    "getMixnetConfig",
-		},
-		Options: capnp.NewCallOptions(opts),
-	}
-	if params != nil {
-		call.ParamsSize = capnp.ObjectSize{DataSize: 0, PointerCount: 0}
-		call.ParamsFunc = func(s capnp.Struct) error { return params(Mix_getMixnetConfig_Params{Struct: s}) }
-	}
-	return Mix_getMixnetConfig_Results_Promise{Pipeline: capnp.NewPipeline(c.Client.Call(call))}
-}
 func (c Mix) AddConvoMsg(ctx context.Context, params func(Mix_addConvoMsg_Params) error, opts ...capnp.CallOption) Mix_addConvoMsg_Results_Promise {
 	if c.Client == nil {
 		return Mix_addConvoMsg_Results_Promise{Pipeline: capnp.NewPipeline(capnp.ErrorAnswer(capnp.ErrNullClient))}
@@ -355,7 +276,7 @@ func (c Mix) AddConvoMsg(ctx context.Context, params func(Mix_addConvoMsg_Params
 		Ctx: ctx,
 		Method: capnp.Method{
 			InterfaceID:   0xe5c2bb103bbd5250,
-			MethodID:      1,
+			MethodID:      0,
 			InterfaceName: "rpc/mix.capnp:Mix",
 			MethodName:    "addConvoMsg",
 		},
@@ -375,7 +296,7 @@ func (c Mix) AddBatch(ctx context.Context, params func(Mix_addBatch_Params) erro
 		Ctx: ctx,
 		Method: capnp.Method{
 			InterfaceID:   0xe5c2bb103bbd5250,
-			MethodID:      2,
+			MethodID:      1,
 			InterfaceName: "rpc/mix.capnp:Mix",
 			MethodName:    "addBatch",
 		},
@@ -389,8 +310,6 @@ func (c Mix) AddBatch(ctx context.Context, params func(Mix_addBatch_Params) erro
 }
 
 type Mix_Server interface {
-	GetMixnetConfig(Mix_getMixnetConfig) error
-
 	AddConvoMsg(Mix_addConvoMsg) error
 
 	AddBatch(Mix_addBatch) error
@@ -403,27 +322,13 @@ func Mix_ServerToClient(s Mix_Server) Mix {
 
 func Mix_Methods(methods []server.Method, s Mix_Server) []server.Method {
 	if cap(methods) == 0 {
-		methods = make([]server.Method, 0, 3)
+		methods = make([]server.Method, 0, 2)
 	}
 
 	methods = append(methods, server.Method{
 		Method: capnp.Method{
 			InterfaceID:   0xe5c2bb103bbd5250,
 			MethodID:      0,
-			InterfaceName: "rpc/mix.capnp:Mix",
-			MethodName:    "getMixnetConfig",
-		},
-		Impl: func(c context.Context, opts capnp.CallOptions, p, r capnp.Struct) error {
-			call := Mix_getMixnetConfig{c, opts, Mix_getMixnetConfig_Params{Struct: p}, Mix_getMixnetConfig_Results{Struct: r}}
-			return s.GetMixnetConfig(call)
-		},
-		ResultsSize: capnp.ObjectSize{DataSize: 0, PointerCount: 1},
-	})
-
-	methods = append(methods, server.Method{
-		Method: capnp.Method{
-			InterfaceID:   0xe5c2bb103bbd5250,
-			MethodID:      1,
 			InterfaceName: "rpc/mix.capnp:Mix",
 			MethodName:    "addConvoMsg",
 		},
@@ -437,7 +342,7 @@ func Mix_Methods(methods []server.Method, s Mix_Server) []server.Method {
 	methods = append(methods, server.Method{
 		Method: capnp.Method{
 			InterfaceID:   0xe5c2bb103bbd5250,
-			MethodID:      2,
+			MethodID:      1,
 			InterfaceName: "rpc/mix.capnp:Mix",
 			MethodName:    "addBatch",
 		},
@@ -449,14 +354,6 @@ func Mix_Methods(methods []server.Method, s Mix_Server) []server.Method {
 	})
 
 	return methods
-}
-
-// Mix_getMixnetConfig holds the arguments for a server call to Mix.getMixnetConfig.
-type Mix_getMixnetConfig struct {
-	Ctx     context.Context
-	Options capnp.CallOptions
-	Params  Mix_getMixnetConfig_Params
-	Results Mix_getMixnetConfig_Results
 }
 
 // Mix_addConvoMsg holds the arguments for a server call to Mix.addConvoMsg.
@@ -475,149 +372,10 @@ type Mix_addBatch struct {
 	Results Mix_addBatch_Results
 }
 
-type Mix_getMixnetConfig_Params struct{ capnp.Struct }
-
-// Mix_getMixnetConfig_Params_TypeID is the unique identifier for the type Mix_getMixnetConfig_Params.
-const Mix_getMixnetConfig_Params_TypeID = 0xa5f3abf7b4044adb
-
-func NewMix_getMixnetConfig_Params(s *capnp.Segment) (Mix_getMixnetConfig_Params, error) {
-	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
-	return Mix_getMixnetConfig_Params{st}, err
-}
-
-func NewRootMix_getMixnetConfig_Params(s *capnp.Segment) (Mix_getMixnetConfig_Params, error) {
-	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0})
-	return Mix_getMixnetConfig_Params{st}, err
-}
-
-func ReadRootMix_getMixnetConfig_Params(msg *capnp.Message) (Mix_getMixnetConfig_Params, error) {
-	root, err := msg.RootPtr()
-	return Mix_getMixnetConfig_Params{root.Struct()}, err
-}
-
-func (s Mix_getMixnetConfig_Params) String() string {
-	str, _ := text.Marshal(0xa5f3abf7b4044adb, s.Struct)
-	return str
-}
-
-// Mix_getMixnetConfig_Params_List is a list of Mix_getMixnetConfig_Params.
-type Mix_getMixnetConfig_Params_List struct{ capnp.List }
-
-// NewMix_getMixnetConfig_Params creates a new list of Mix_getMixnetConfig_Params.
-func NewMix_getMixnetConfig_Params_List(s *capnp.Segment, sz int32) (Mix_getMixnetConfig_Params_List, error) {
-	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 0}, sz)
-	return Mix_getMixnetConfig_Params_List{l}, err
-}
-
-func (s Mix_getMixnetConfig_Params_List) At(i int) Mix_getMixnetConfig_Params {
-	return Mix_getMixnetConfig_Params{s.List.Struct(i)}
-}
-
-func (s Mix_getMixnetConfig_Params_List) Set(i int, v Mix_getMixnetConfig_Params) error {
-	return s.List.SetStruct(i, v.Struct)
-}
-
-func (s Mix_getMixnetConfig_Params_List) String() string {
-	str, _ := text.MarshalList(0xa5f3abf7b4044adb, s.List)
-	return str
-}
-
-// Mix_getMixnetConfig_Params_Promise is a wrapper for a Mix_getMixnetConfig_Params promised by a client call.
-type Mix_getMixnetConfig_Params_Promise struct{ *capnp.Pipeline }
-
-func (p Mix_getMixnetConfig_Params_Promise) Struct() (Mix_getMixnetConfig_Params, error) {
-	s, err := p.Pipeline.Struct()
-	return Mix_getMixnetConfig_Params{s}, err
-}
-
-type Mix_getMixnetConfig_Results struct{ capnp.Struct }
-
-// Mix_getMixnetConfig_Results_TypeID is the unique identifier for the type Mix_getMixnetConfig_Results.
-const Mix_getMixnetConfig_Results_TypeID = 0x926c1f797f824577
-
-func NewMix_getMixnetConfig_Results(s *capnp.Segment) (Mix_getMixnetConfig_Results, error) {
-	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
-	return Mix_getMixnetConfig_Results{st}, err
-}
-
-func NewRootMix_getMixnetConfig_Results(s *capnp.Segment) (Mix_getMixnetConfig_Results, error) {
-	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
-	return Mix_getMixnetConfig_Results{st}, err
-}
-
-func ReadRootMix_getMixnetConfig_Results(msg *capnp.Message) (Mix_getMixnetConfig_Results, error) {
-	root, err := msg.RootPtr()
-	return Mix_getMixnetConfig_Results{root.Struct()}, err
-}
-
-func (s Mix_getMixnetConfig_Results) String() string {
-	str, _ := text.Marshal(0x926c1f797f824577, s.Struct)
-	return str
-}
-
-func (s Mix_getMixnetConfig_Results) Meta() (MixnetConfig, error) {
-	p, err := s.Struct.Ptr(0)
-	return MixnetConfig{Struct: p.Struct()}, err
-}
-
-func (s Mix_getMixnetConfig_Results) HasMeta() bool {
-	p, err := s.Struct.Ptr(0)
-	return p.IsValid() || err != nil
-}
-
-func (s Mix_getMixnetConfig_Results) SetMeta(v MixnetConfig) error {
-	return s.Struct.SetPtr(0, v.Struct.ToPtr())
-}
-
-// NewMeta sets the meta field to a newly
-// allocated MixnetConfig struct, preferring placement in s's segment.
-func (s Mix_getMixnetConfig_Results) NewMeta() (MixnetConfig, error) {
-	ss, err := NewMixnetConfig(s.Struct.Segment())
-	if err != nil {
-		return MixnetConfig{}, err
-	}
-	err = s.Struct.SetPtr(0, ss.Struct.ToPtr())
-	return ss, err
-}
-
-// Mix_getMixnetConfig_Results_List is a list of Mix_getMixnetConfig_Results.
-type Mix_getMixnetConfig_Results_List struct{ capnp.List }
-
-// NewMix_getMixnetConfig_Results creates a new list of Mix_getMixnetConfig_Results.
-func NewMix_getMixnetConfig_Results_List(s *capnp.Segment, sz int32) (Mix_getMixnetConfig_Results_List, error) {
-	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1}, sz)
-	return Mix_getMixnetConfig_Results_List{l}, err
-}
-
-func (s Mix_getMixnetConfig_Results_List) At(i int) Mix_getMixnetConfig_Results {
-	return Mix_getMixnetConfig_Results{s.List.Struct(i)}
-}
-
-func (s Mix_getMixnetConfig_Results_List) Set(i int, v Mix_getMixnetConfig_Results) error {
-	return s.List.SetStruct(i, v.Struct)
-}
-
-func (s Mix_getMixnetConfig_Results_List) String() string {
-	str, _ := text.MarshalList(0x926c1f797f824577, s.List)
-	return str
-}
-
-// Mix_getMixnetConfig_Results_Promise is a wrapper for a Mix_getMixnetConfig_Results promised by a client call.
-type Mix_getMixnetConfig_Results_Promise struct{ *capnp.Pipeline }
-
-func (p Mix_getMixnetConfig_Results_Promise) Struct() (Mix_getMixnetConfig_Results, error) {
-	s, err := p.Pipeline.Struct()
-	return Mix_getMixnetConfig_Results{s}, err
-}
-
-func (p Mix_getMixnetConfig_Results_Promise) Meta() MixnetConfig_Promise {
-	return MixnetConfig_Promise{Pipeline: p.Pipeline.GetPipeline(0)}
-}
-
 type Mix_addConvoMsg_Params struct{ capnp.Struct }
 
 // Mix_addConvoMsg_Params_TypeID is the unique identifier for the type Mix_addConvoMsg_Params.
-const Mix_addConvoMsg_Params_TypeID = 0xf080ef04be3b5ceb
+const Mix_addConvoMsg_Params_TypeID = 0xa5f3abf7b4044adb
 
 func NewMix_addConvoMsg_Params(s *capnp.Segment) (Mix_addConvoMsg_Params, error) {
 	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
@@ -635,7 +393,7 @@ func ReadRootMix_addConvoMsg_Params(msg *capnp.Message) (Mix_addConvoMsg_Params,
 }
 
 func (s Mix_addConvoMsg_Params) String() string {
-	str, _ := text.Marshal(0xf080ef04be3b5ceb, s.Struct)
+	str, _ := text.Marshal(0xa5f3abf7b4044adb, s.Struct)
 	return str
 }
 
@@ -682,7 +440,7 @@ func (s Mix_addConvoMsg_Params_List) Set(i int, v Mix_addConvoMsg_Params) error 
 }
 
 func (s Mix_addConvoMsg_Params_List) String() string {
-	str, _ := text.MarshalList(0xf080ef04be3b5ceb, s.List)
+	str, _ := text.MarshalList(0xa5f3abf7b4044adb, s.List)
 	return str
 }
 
@@ -701,7 +459,7 @@ func (p Mix_addConvoMsg_Params_Promise) Msg() ConvoMixMsg_Promise {
 type Mix_addConvoMsg_Results struct{ capnp.Struct }
 
 // Mix_addConvoMsg_Results_TypeID is the unique identifier for the type Mix_addConvoMsg_Results.
-const Mix_addConvoMsg_Results_TypeID = 0xb6ccb7cd5c0fca73
+const Mix_addConvoMsg_Results_TypeID = 0x926c1f797f824577
 
 func NewMix_addConvoMsg_Results(s *capnp.Segment) (Mix_addConvoMsg_Results, error) {
 	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 0})
@@ -719,7 +477,7 @@ func ReadRootMix_addConvoMsg_Results(msg *capnp.Message) (Mix_addConvoMsg_Result
 }
 
 func (s Mix_addConvoMsg_Results) String() string {
-	str, _ := text.Marshal(0xb6ccb7cd5c0fca73, s.Struct)
+	str, _ := text.Marshal(0x926c1f797f824577, s.Struct)
 	return str
 }
 
@@ -749,7 +507,7 @@ func (s Mix_addConvoMsg_Results_List) Set(i int, v Mix_addConvoMsg_Results) erro
 }
 
 func (s Mix_addConvoMsg_Results_List) String() string {
-	str, _ := text.MarshalList(0xb6ccb7cd5c0fca73, s.List)
+	str, _ := text.MarshalList(0x926c1f797f824577, s.List)
 	return str
 }
 
@@ -764,7 +522,7 @@ func (p Mix_addConvoMsg_Results_Promise) Struct() (Mix_addConvoMsg_Results, erro
 type Mix_addBatch_Params struct{ capnp.Struct }
 
 // Mix_addBatch_Params_TypeID is the unique identifier for the type Mix_addBatch_Params.
-const Mix_addBatch_Params_TypeID = 0xb8d4c1f6bef26505
+const Mix_addBatch_Params_TypeID = 0xf080ef04be3b5ceb
 
 func NewMix_addBatch_Params(s *capnp.Segment) (Mix_addBatch_Params, error) {
 	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 1})
@@ -782,7 +540,7 @@ func ReadRootMix_addBatch_Params(msg *capnp.Message) (Mix_addBatch_Params, error
 }
 
 func (s Mix_addBatch_Params) String() string {
-	str, _ := text.Marshal(0xb8d4c1f6bef26505, s.Struct)
+	str, _ := text.Marshal(0xf080ef04be3b5ceb, s.Struct)
 	return str
 }
 
@@ -829,7 +587,7 @@ func (s Mix_addBatch_Params_List) Set(i int, v Mix_addBatch_Params) error {
 }
 
 func (s Mix_addBatch_Params_List) String() string {
-	str, _ := text.MarshalList(0xb8d4c1f6bef26505, s.List)
+	str, _ := text.MarshalList(0xf080ef04be3b5ceb, s.List)
 	return str
 }
 
@@ -848,7 +606,7 @@ func (p Mix_addBatch_Params_Promise) Batch() Batch_Promise {
 type Mix_addBatch_Results struct{ capnp.Struct }
 
 // Mix_addBatch_Results_TypeID is the unique identifier for the type Mix_addBatch_Results.
-const Mix_addBatch_Results_TypeID = 0x873cb130ee0d5c36
+const Mix_addBatch_Results_TypeID = 0xb6ccb7cd5c0fca73
 
 func NewMix_addBatch_Results(s *capnp.Segment) (Mix_addBatch_Results, error) {
 	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 8, PointerCount: 0})
@@ -866,7 +624,7 @@ func ReadRootMix_addBatch_Results(msg *capnp.Message) (Mix_addBatch_Results, err
 }
 
 func (s Mix_addBatch_Results) String() string {
-	str, _ := text.Marshal(0x873cb130ee0d5c36, s.Struct)
+	str, _ := text.Marshal(0xb6ccb7cd5c0fca73, s.Struct)
 	return str
 }
 
@@ -896,7 +654,7 @@ func (s Mix_addBatch_Results_List) Set(i int, v Mix_addBatch_Results) error {
 }
 
 func (s Mix_addBatch_Results_List) String() string {
-	str, _ := text.MarshalList(0x873cb130ee0d5c36, s.List)
+	str, _ := text.MarshalList(0xb6ccb7cd5c0fca73, s.List)
 	return str
 }
 
@@ -908,66 +666,52 @@ func (p Mix_addBatch_Results_Promise) Struct() (Mix_addBatch_Results, error) {
 	return Mix_addBatch_Results{s}, err
 }
 
-const schema_a1ac1f9011521afa = "x\xda\x94\x94[h\x1cU\x1c\xc6\xff\xdf9\xb3\x99\x0a" +
-	"\xd9\xcd\x9eL|\xb0\x08K\xa5\x0f\xa6\xd8\xab\x17\xa4\xad" +
-	"fM\x1b0\xd1\x91=K_,y\x99\xcc\x8e\xdb\x81" +
-	"\xec\xcc\x9a\x99\xb5\x9b\x87R\x0d\x88\xf4EJ\xc1\x07}" +
-	"((T\x11\x15\x09x\x03\xb1\xa0\xa0\x05\xd1\x07\xc5\x87" +
-	"\x1a\xd17\xf1A\x8c\xb7D\xc1\x97\x91s6s\xc9\x1a" +
-	"oog\xe0\xe3\xf7\xfd\xcf\xf7\xcd\xff\x1c\xba\x86:;" +
-	"\\:X\"\x92\xc7K#\xc9]\xf3\xe5\xf5C\xab\xc7" +
-	"\x9f\"9\x0e\x10\x19&\xd1\xed\xe7\xd8n\x10\xac'\xd9" +
-	"\x14!9;\xb3r~\xb9\xb6x\x89\xc48\x88JP" +
-	"\x82+\xac\xa9\x04\xabZ\xf0\xe2\xe9\x95\xf5\x1b\xbc\x0b\xcf" +
-	"\x90\xac\x00\xc9\x1f\xbb\x9b\xe2b\xed\xd5\xe75\xc9\xfa\x8c" +
-	"\xadY_3u\xfaRk\xbf\x9a3\xde\xf8\xfd\x95_" +
-	"\xaf\x0c`\xda\x0c|\x0ed$\xaf]\xbc\xf7\xbb\xe0\xf2" +
-	"\xe6K$*\x05\x88\xb6\xb3~`/X\x9b\x9a\xf2\xb3" +
-	"\xa6D\x1f\x8f\xcd\x7f\xfa\xf6'o\x15g\xde\xc3\x8f\xa8" +
-	"\x91&\xb9\x12\x94\xbc_\xae\xfe\xf6\xfe\x17\xef\x14g\x9e" +
-	"\xe5\xe3J \xb5\xe0ig\xe3\x9b\xeb\x1f^_\x1br" +
-	"\xe3\xca\xe3Q\xfe\xb9uN\x9f\x96\xf9\xeb\x84\xa4\xd1|" +
-	"\xefX\xf5\xdd\x0f\xbe%Q\xe1\xb9\x96`\x09\xe3\x92u" +
-	"\x93\xbe\xe6\x8d\xc65\xebYuJ\xbe\x9f?v\xd5\xf8" +
-	"\xf1\xf1\x9f\x8a\xceO\x18\xfb\x94\xf3\x05C9\x97[\x97" +
-	"\xf7\x7ft\xf2\xe1\x8d!g}\xbb\x97\x8d5\xebM\x0d" +
-	"\\5\xce\xd2\xfed\xa9\xeb\x1e\xec\xf8\xfd\x03\xdcu\xba" +
-	"A\xf7\xa8\xed\xf7\x0f8\xad\xd6\xb4\x13\xbbg\xf66\xbd" +
-	"\xa8\xb7\xc8\xe3H\x1a\xdc 2@$\xcaG\x89\xe4." +
-	"\x0e9\xc10\x15\xc5N\xdc\x8b0B\x0c#\x84\x0ce" +
-	"\xe4\xa8\xb6\x17\xdb~?\xf0\xe2\x13a\xf0\x88\xdf\x1e\x10" +
-	"cl#\xee\xcb\x89c\x1d/vP\xcd\xeb&\xa0Z" +
-	" \xb3\x8c\xbc\x85\xe4~\xbb\x01\x14i\xcf\x11\xc9*\x87" +
-	"\xbc\x99!\x89<7\x0cZ\xd1)\x84\x0fy\xfd\xb8\x19" +
-	"\xf6x\xd0\x82I\x0c\xe6\x7f\x9b\xb6\xe1,9\x9d\x88(" +
-	"\xd3b\xa0\x9dv\xcc\xd8=3d\x9c^c\xaf\xbaF" +
-	"\xd4\x8eP!48P&\xa6\x8e\x7f\x13\xf4\x890x" +
-	",\xb4#\x95LME\xf3\x7f\xb3\xde\xa96=\xf6\xf6" +
-	"\x8c\x8f\xe4\xa4\xda\x82\x12\xa1\x9ao\xc3\xce!\x0f&\xf3" +
-	"\xfbv\x04\x9d\xf1hF\x9bQs\xd59\xe4\x83\x0c\x02" +
-	"\x98P\xfb!f\x95\xc5I\x0e\xd9`\x10\x8cM\x80\x11" +
-	"\x09{\x9aH\xde\xcf!O1Lu{\x0b\x0fx\xcb" +
-	":\x8f2\xa1\x16\x84\x81\xeb\xa5_\xe7\xdd0\x88\xbd " +
-	"N\xbf\x87\x13\xb7}\xf4\x07C\x94\x88\xb2\x0dG\xfan" +
-	"\x08\xb9BL\xcc\x9a@\xb6\x1cH\x17X\xdc\xb3@L" +
-	"\xdci\x82e+\x8b\xf4A\x12\x93s\xc4\xc4\x1e3I" +
-	"\x9b\xc7V\xf5TG\x92\xb6C\xa6\x1d\xb5\x07\xdf:_" +
-	"\"\xaa\xa3\x81\x7fm\xb4\xe1\x8c\xa9\xdf\xa7X\xc3-y" +
-	"\x0df'j\xa3\x9a?\x12\xffP\xc2L\xdf\x8fm\x1e" +
-	"\xe9\x16ve\xb0\xc9\xd3D\xf2V\x0eyG\xa1\x85\xc3" +
-	"*\xf0\xdb8\xe4\xdd\x0c\x89\xbb\xe8{A|_\x8bx" +
-	"k\x09\xa3\xc40\xfa\xd7\xa0\xff\x0c\x00\x00\xff\xff^=" +
-	"}\x04"
+const schema_a1ac1f9011521afa = "x\xda\x94\x93\xc1k\x13M\x18\xc6\xdfgf\xd3\xf4\xd0" +
+	"\xb4\xd9n\xbfK\xe1#|\x1f\x05m\xb1\xb5\xad\x1e\xa4" +
+	"\x05\x1bk\x03\xb6\xba\xb0\x13\xbc(\xbdl7!\x0d$" +
+	"\x9b\x90\xd9\xd8\xf4 \x15A\xc4\x8b\xd4\xfe\x01\x85\x0a\xc5" +
+	"\x83\x16)\x88\"R\x0f\x82\x1eD/\x9eJ\x05o\xe2" +
+	"\xc1\x83\x82\x15\xd1\xcb\xcal\xdc&\x8d\xa8x{\x07\x9e" +
+	"\xf9=\xef\xfb\xcc;\xc3\xf3H\xb2\x91\xc8\x01\x8dH\x0c" +
+	"G\xda\xfc\x85\xd4\xe5\xa5\xc5Da\x85D7@\xa4E" +
+	"\x89\x8e|\xc5(\x08\x06\xd8\x04\xc1\x7f=\xa3\xdd\xfbr" +
+	"\xfb\xd3:\xe9\xdd \x8a@\x09\xfec\x03J\xd0\x1f\x08" +
+	"6\x96\x8f\xbfsW?\xdf\"\xbd\x13\xfe\xb7\xde\xb4\xbe" +
+	"\x9c\xb8\xb3V\x17\x1a\xd3\xec\xa6!\x98\xaa\xcc@+\x9f" +
+	"w\xcd\xbe|\xf0\xe2~\xb3\xdbE\xd6\xab`W\x02\xc1" +
+	"u{\xf7\xcd\xf6\xd3\xed\x9d\x16\x18W\x88u\xf6\xca\xd8" +
+	"\x0c`\x1b\xec.\xc1\xb7\xd2[\xe3\xf1GO\xde\x92\xde" +
+	"\xc9\x1bZ\x82\x91\xe2+\x86\x19\\\x99\xe6W\x8d5U" +
+	"\xf9\xefg\xc7\x1fk\x1f.}l\x1e\xe3\x1a\xefV\xce" +
+	"7\xb8r\x8eeV\x07\x9fM\x9d\xdbmq\x0e\xfc6" +
+	"\xf9\x8e\xb1\x15\x00\x1f\xf2\x05\x1a\xf4+e\xe7p1_" +
+	"\x1b\xe2\x8e]v\xcbcf\xbe6dg2'K\xee" +
+	"\x85\x92)s}\xe9lBV\x0b\x9e\x14\x1a\xd7\x884" +
+	"\x10\xe9\xb11\"\xd1\xce!z\x18&\xa4g{U\x89" +
+	"6bh#\xfc\x89f\xd9]\x15\xbb\xb8\x0f\xf6\x7f\x03" +
+	"\x16-\xca\x1c\xe2\x8d\xdc\x08\x8871QgN\xdaQ" +
+	"\xcf\x99\xb7\x80f\xca\xc0\x0fJ\x1fCWQ\xe6$:" +
+	"\x09\x16\x07b\xc4T\xf9\x8b\xbe&m\xcf\x99\xefKg" +
+	"e\xb5\xc0\xffzDVG\xd5g\xcb\xd7L\x89\x9cj" +
+	"\xaac\x0f\x92R\x90$\x878\xc3\xa0\x03=jK\xf4" +
+	"\xe9Q\"1\xc5!,\x06\x9d\xb1\x1e0\"\xdd\x9c$" +
+	"\x12\xa78\xc4Y\x86\x89ru\xeetv1\xe8<F" +
+	"H\xb8%\xd7\xc9\x86\xa7%\xa7\xe4zY\xd7\x0b\xcf\xad" +
+	"\xd9\x98y\xd4T\x13\xed<B\xb4\xb7\xee\x08?\x86>" +
+	"2GL\xef\x8f\x02{;\x84p\x8d\xf5\x7fg\x88\xe9" +
+	"\xffD\xfd\xf0\xbd(j\xca\\\x12~\x98\x13\x11%a" +
+	"\xe1\xf7YZv\xc5.b_\x94\xa3\x8d(\x13sJ" +
+	"\x84x\xe3\x9f\xb5<qs\xa6\xa9Z\xde3\xb9\xcc\xd5" +
+	"\xe7\x09q\xfd\xe7\x89\xc4A\x0eq\xb4)\xd4\x11\x95\xdf" +
+	"!\x0eq\x8c\xc1w\x0a\xf9\xac\xeb\x9d\xc8\x10\xcfT\xd0" +
+	"A\x0c\x1d?\xe7\xf6=\x00\x00\xff\xff\\P\x0fu"
 
 func init() {
 	schemas.Register(schema_a1ac1f9011521afa,
-		0x873cb130ee0d5c36,
 		0x926c1f797f824577,
-		0x95896509ee825aa6,
 		0xa5f3abf7b4044adb,
 		0xa7f59e6ee73e90ad,
 		0xb6ccb7cd5c0fca73,
-		0xb8d4c1f6bef26505,
 		0xdad8c5d8def4618e,
 		0xe5c2bb103bbd5250,
 		0xf080ef04be3b5ceb,
