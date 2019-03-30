@@ -15,7 +15,7 @@ struct ConvoMixMsg {
 }
 
 struct Batch {
-    msgs @0 :List(Data);
+    msgs @0 :List(ConvoMixMsg);
 }
 
 interface Mix {

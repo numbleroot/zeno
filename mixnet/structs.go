@@ -61,6 +61,7 @@ type Mix struct {
 	OwnIndex      int
 	IsEntry       bool
 	IsExit        bool
+	Successor     *rpc.Mix
 	RoundTimer    *time.Timer
 	muFirstPool   *sync.Mutex
 	FirstPoolMix  []*rpc.ConvoMixMsg

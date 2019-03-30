@@ -2,6 +2,7 @@ package mixnet
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"fmt"
 	"io"
@@ -50,6 +51,31 @@ func (mix *Mix) SetOwnPlace() {
 			break
 		}
 	}
+}
+
+// ReconnectToSuccessor connects from one mix
+// to its successor mix in the cascade.
+func (mix *Mix) ReconnectToSuccessor() error {
+
+	if !mix.IsExit {
+
+		// Connect to successor mix over TCP.
+		conn, err := net.Dial("tcp", mix.ChainMatrix[mix.OwnChain][(mix.OwnIndex+1)].Addr)
+		if err != nil {
+			return err
+		}
+
+		// Wrap TCP connection in Cap'n Proto RPC.
+		connRCP := capnprpc.NewConn(capnprpc.StreamTransport(conn))
+
+		// Bundle RPC connection in struct on
+		// which to call methods later on.
+		mix.Successor = &rpc.Mix{
+			Client: connRCP.Bootstrap(context.Background()),
+		}
+	}
+
+	return nil
 }
 
 // AddCoverMsgsToPool ensures that a reasonable
@@ -277,29 +303,47 @@ func (mix *Mix) InitNewRound() error {
 	return nil
 }
 
+// SendOutMsg is the goroutine worker function
+// that expects messages via a channel and sends
+// them to the final outside client.
 func (mix *Mix) SendOutMsg(msgChan chan *rpc.ConvoExitMsg) {
 
-	for msg := range msgChan {
+	for exitMsg := range msgChan {
 
 		// Extract network address of outside client.
-		addr, err := msg.ClientAddr()
+		addr, err := exitMsg.ClientAddr()
 		if err != nil {
 			fmt.Printf("Failed to extract client address of outgoing message: %v\n", err)
+			continue
+		}
+
+		// Extract message to send.
+		msg, err := exitMsg.Content()
+		if err != nil {
+			fmt.Printf("Failed to extract outgoing message: %v\n", err)
+			continue
 		}
 
 		// Connect to client node.
 		conn, err := net.Dial("tcp", addr)
 		if err != nil {
-			fmt.Printf("Failed sending message to final client '%s': %v\n", msg.ClientAddr, err)
+			fmt.Printf("Failed sending message to final client '%s': %v\n", addr, err)
 			continue
 		}
 
 		// Send message content and close connection.
-		fmt.Fprintf(conn, "%v\n", msg.Content)
+		fmt.Fprintf(conn, "%v\n", msg)
 		conn.Close()
 	}
 }
 
+// RotateRoundState performs the necessary
+// operations to switch from one round to
+// the next. This involves appropriately
+// rotating message pools, forwarding the
+// batch of messages chosen in this round,
+// and preparing the subsequent replacement
+// message pool with cover messages.
 func (mix *Mix) RotateRoundState() error {
 
 	numClients := len(mix.KnownClients)
@@ -395,6 +439,36 @@ func (mix *Mix) RotateRoundState() error {
 			coverGenErrChan <- nil
 
 		}(numClients, numSamples)
+
+		// Send batch of conversation messages
+		// to subsequent mix in cascade.
+		status, err := mix.Successor.AddBatch(context.Background(), func(p rpc.Mix_addBatch_Params) error {
+
+			// Create new batch and set its messages.
+			batch, err := p.NewBatch()
+			if err != nil {
+				return err
+			}
+
+			msgs, err := batch.NewMsgs(int32(len(mix.OutPoolMix)))
+			if err != nil {
+				return err
+			}
+
+			for i := range mix.OutPoolMix {
+				msgs.Set(i, *mix.OutPoolMix[i])
+			}
+
+			return nil
+
+		}).Struct()
+		if err != nil {
+			return err
+		}
+
+		if status.Status() != 0 {
+			return fmt.Errorf("successor mix returned non-zero response: %d", status.Status())
+		}
 	}
 
 	// Wait for cover traffic generation to finish.
@@ -414,22 +488,26 @@ func (mix *Mix) AddConvoMsg(call rpc.Mix_addConvoMsg) error {
 	// mix node's message pools from request.
 	convoMsgRaw, err := call.Params.Msg()
 	if err != nil {
-		call.Results.SetStatus(1)
-		return err
-	}
 
-	// Acknowledge client.
-	call.Results.SetStatus(0)
+		fmt.Printf("Error extracting AddConvoMsg request parameters: %v\n", err)
+		call.Results.SetStatus(1)
+
+		return nil
+	}
 
 	// Prepare byte slice to fit message.
 	// TODO: Fix size.
-	convoMsgBytes := make([]byte, 500)
+	convoMsgBytes := make([]byte, 2048)
 
 	// Extract public key used during encryption
 	// of onionized message from convo message.
 	pubKey := new([32]byte)
 	pubKeyRaw, err := convoMsgRaw.PubKey()
 	if err != nil {
+
+		fmt.Printf("Error extracting public key from request: %v\n", err)
+		call.Results.SetStatus(1)
+
 		return err
 	}
 	copy(pubKey[:], pubKeyRaw)
@@ -439,6 +517,10 @@ func (mix *Mix) AddConvoMsg(call rpc.Mix_addConvoMsg) error {
 	nonce := new([24]byte)
 	nonceRaw, err := convoMsgRaw.Nonce()
 	if err != nil {
+
+		fmt.Printf("Error extracting nonce from request: %v\n", err)
+		call.Results.SetStatus(1)
+
 		return err
 	}
 	copy(nonce[:], nonceRaw)
@@ -447,13 +529,23 @@ func (mix *Mix) AddConvoMsg(call rpc.Mix_addConvoMsg) error {
 	// received convo message.
 	encConvoMsg, err := convoMsgRaw.Content()
 	if err != nil {
+
+		fmt.Printf("Error extracting message from request: %v\n", err)
+		call.Results.SetStatus(1)
+
 		return err
 	}
+
+	fmt.Printf("Will decrypt with:\n\tout: '%s'\n\tmsg: '%s'\n\tnonce: '%s'\n\tpubKey: '%s'\n\tsecKey: '%s'\n\n", convoMsgBytes, encConvoMsg, nonce, pubKey, mix.RecvSecKey)
 
 	// Decrypt message content.
 	out, ok := box.Open(convoMsgBytes, encConvoMsg, nonce, pubKey, mix.RecvSecKey)
 	if !ok {
-		return fmt.Errorf("Decryption of conversation message failed\n")
+
+		fmt.Printf("Error decrypting received message.\n")
+		call.Results.SetStatus(1)
+
+		return nil
 	}
 
 	fmt.Printf("AddConvoMsg: out of box.Open: %v\n", out)
@@ -462,6 +554,10 @@ func (mix *Mix) AddConvoMsg(call rpc.Mix_addConvoMsg) error {
 	// byte slice to Cap'n Proto message.
 	convoMsgProto, err := capnp.Unmarshal(convoMsgBytes)
 	if err != nil {
+
+		fmt.Printf("Error unmarshaling received message: %v\n", err)
+		call.Results.SetStatus(1)
+
 		return err
 	}
 
@@ -469,6 +565,10 @@ func (mix *Mix) AddConvoMsg(call rpc.Mix_addConvoMsg) error {
 	// conversation message we defined.
 	convoMsg, err := rpc.ReadRootConvoMixMsg(convoMsgProto)
 	if err != nil {
+
+		fmt.Printf("Error reading conversation message from received message: %v\n", err)
+		call.Results.SetStatus(1)
+
 		return err
 	}
 
@@ -478,6 +578,9 @@ func (mix *Mix) AddConvoMsg(call rpc.Mix_addConvoMsg) error {
 	mix.FirstPoolMix = append(mix.FirstPoolMix, &convoMsg)
 	mix.muFirstPool.Unlock()
 
+	// Acknowledge client.
+	call.Results.SetStatus(0)
+
 	return nil
 }
 
@@ -486,13 +589,18 @@ func (mix *Mix) AddConvoMsg(call rpc.Mix_addConvoMsg) error {
 // to a subsequent mix node.
 func (mix *Mix) AddBatch(call rpc.Mix_addBatch) error {
 
-	data, err := call.Params.Batch()
+	batch, err := call.Params.Batch()
 	if err != nil {
+
+		fmt.Printf("Error extracting batch of mix messages from request: %v\n", err)
+		call.Results.SetStatus(1)
+
 		return err
 	}
 
-	fmt.Printf("\nAddBatch req: '%#v'\n", data)
+	fmt.Printf("\nAddBatch req: '%#v'\n", batch)
 
+	// Acknowledge predecessor mix.
 	call.Results.SetStatus(0)
 
 	return nil

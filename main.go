@@ -54,8 +54,6 @@ func main() {
 	msgLisAddr := *msgLisAddrFlag
 	pkiLisAddr := *pkiLisAddrFlag
 
-	fmt.Printf("Params:  isClient='%v'  &&  isMix='%v'  &&  pkiAddr='%v'  &&  msgLisAddr='%v'  &&  pkiLisAddr='%v'\n\n", isClient, isMix, pkiAddr, msgLisAddr, pkiLisAddr)
-
 	// Generate a public-private key pair used
 	// ONLY for receiving messages. Based on
 	// Curve25519 via NaCl library.
@@ -143,7 +141,7 @@ func main() {
 
 	fmt.Printf("Waiting for chain matrix to configure...\n")
 
-	// Wait until chainMatrix has been built.
+	// Wait until chain matrix has been built.
 	<-node.ChainMatrixConfigured
 
 	fmt.Printf("Chain matrix configured.\n\n")
@@ -184,8 +182,14 @@ func main() {
 			Node: node,
 		}
 
-		// Determine this mix' place in chain matrix.
+		// Determine this mix node's place in chain matrix.
 		mix.SetOwnPlace()
+
+		// Connect to each mix node's successor mix.
+		err := mix.ReconnectToSuccessor()
+		if err != nil {
+			fmt.Printf("Failed to connect to mix node's successor mix: %v\n", err)
+		}
 
 		fmt.Printf("Own chain: %d, own index on chain: %d, is entry? %v, is exit? %v\n\n", mix.OwnChain, mix.OwnIndex, mix.IsEntry, mix.IsExit)
 
@@ -217,7 +221,7 @@ func main() {
 			SendWG: &sync.WaitGroup{},
 		}
 
-		// Connect to all entry mixes in chainMatrix.
+		// Connect to all entry mixes in chain matrix.
 		err = client.ReconnectToEntries()
 		if err != nil {
 			fmt.Printf("Error while connecting to entry mixes: %v\n", err)
