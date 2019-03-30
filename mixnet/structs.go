@@ -71,4 +71,6 @@ type Mix struct {
 	ThirdPoolExit []*rpc.ConvoExitMsg
 	NextPoolMix   []*rpc.ConvoMixMsg
 	NextPoolExit  []*rpc.ConvoExitMsg
+	OutPoolMix    []*rpc.ConvoMixMsg
+	OutPoolExit   []*rpc.ConvoExitMsg
 }
