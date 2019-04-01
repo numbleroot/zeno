@@ -60,7 +60,7 @@ func (mix *Mix) ReconnectToSuccessor() error {
 	if !mix.IsExit {
 
 		// Connect to successor mix over TCP.
-		conn, err := net.Dial("tcp", mix.ChainMatrix[mix.OwnChain][(mix.OwnIndex+1)].Addr)
+		conn, err := net.Dial("tcp", string(mix.ChainMatrix[mix.OwnChain][(mix.OwnIndex+1)].Addr))
 		if err != nil {
 			return err
 		}
@@ -87,12 +87,9 @@ func (mix *Mix) ReconnectToSuccessor() error {
 // old messages.
 func (mix *Mix) AddCoverMsgsToPool(initFirst bool, numClients int, numSamples int) error {
 
-	mixPoolToInit := mix.NextPoolMix
-	exitPoolToInit := mix.NextPoolExit
-
+	poolToInit := mix.NextPool
 	if initFirst {
-		mixPoolToInit = mix.FirstPoolMix
-		exitPoolToInit = mix.FirstPoolExit
+		poolToInit = mix.FirstPool
 	}
 
 	// Number of mixes in own cascade until exit.
@@ -124,18 +121,18 @@ func (mix *Mix) AddCoverMsgsToPool(initFirst bool, numClients int, numSamples in
 		}
 
 		// Fill ConvoExitMsg.
-		convoExitMsg, err := rpc.NewRootConvoExitMsg(protoMsgSeg)
+		convoExitMsg, err := rpc.NewRootConvoMsg(protoMsgSeg)
 		if err != nil {
 			return err
 		}
-		convoExitMsg.SetClientAddr(mix.KnownClients[chosen].Addr)
+		convoExitMsg.SetPubKeyOrAddr(mix.KnownClients[chosen].Addr)
 		convoExitMsg.SetContent(msgPadded[:])
 
 		if mix.IsExit {
 
 			// This is an exit mix, thus simply add the
 			// cover message directly to respective pool.
-			exitPoolToInit = append(exitPoolToInit, &convoExitMsg)
+			poolToInit = append(poolToInit, &convoExitMsg)
 
 		} else {
 
@@ -200,13 +197,12 @@ func (mix *Mix) AddCoverMsgsToPool(initFirst bool, numClients int, numSamples in
 				}
 
 				// Create new ConvoMixMsg and insert values.
-				convoMixMsg, err := rpc.NewRootConvoMixMsg(protoMsgSeg)
+				convoMixMsg, err := rpc.NewRootConvoMsg(protoMsgSeg)
 				if err != nil {
 					fmt.Printf("Failed creating new root ConvoMixMsg: %v\n", err)
 					os.Exit(1)
 				}
-				convoMixMsg.SetPubKey(keys[mix].PubKey[:])
-				convoMixMsg.SetNonce(keys[mix].Nonce[:])
+				convoMixMsg.SetPubKeyOrAddr(keys[mix].PubKey[:])
 				convoMixMsg.SetContent(encMsg)
 
 				// Marshal final ConvoMixMsg to byte slice.
@@ -232,17 +228,16 @@ func (mix *Mix) AddCoverMsgsToPool(initFirst bool, numClients int, numSamples in
 			}
 
 			// Create new ConvoMixMsg and insert values.
-			convoMixMsg, err := rpc.NewRootConvoMixMsg(protoMsgSeg)
+			convoMixMsg, err := rpc.NewRootConvoMsg(protoMsgSeg)
 			if err != nil {
 				fmt.Printf("Failed creating new root ConvoMixMsg: %v\n", err)
 				os.Exit(1)
 			}
-			convoMixMsg.SetPubKey(keys[0].PubKey[:])
-			convoMixMsg.SetNonce(keys[0].Nonce[:])
+			convoMixMsg.SetPubKeyOrAddr(keys[0].PubKey[:])
 			convoMixMsg.SetContent(encMsg)
 
 			// Add layered ConvoMixMsg to respective pool.
-			mixPoolToInit = append(mixPoolToInit, &convoMixMsg)
+			poolToInit = append(poolToInit, &convoMixMsg)
 		}
 	}
 
@@ -262,28 +257,13 @@ func (mix *Mix) InitNewRound() error {
 	}
 	maxNumMsg := numClients + numSamples + 10
 
+	// Prepare pools for conversation messages.
 	mix.muFirstPool = &sync.Mutex{}
-
-	if mix.IsExit {
-
-		// Prepare pools for conversation messages
-		// at exit mixes.
-		mix.FirstPoolExit = make([]*rpc.ConvoExitMsg, 0, maxNumMsg)
-		mix.SecPoolExit = make([]*rpc.ConvoExitMsg, 0, (2 * (maxNumMsg / 3)))
-		mix.ThirdPoolExit = make([]*rpc.ConvoExitMsg, 0, (maxNumMsg / 2))
-		mix.NextPoolExit = make([]*rpc.ConvoExitMsg, 0, maxNumMsg)
-		mix.OutPoolExit = make([]*rpc.ConvoExitMsg, 0, maxNumMsg)
-
-	} else {
-
-		// Prepare pools for conversation messages
-		// at entry or common mixes.
-		mix.FirstPoolMix = make([]*rpc.ConvoMixMsg, 0, maxNumMsg)
-		mix.SecPoolMix = make([]*rpc.ConvoMixMsg, 0, (2 * (maxNumMsg / 3)))
-		mix.ThirdPoolMix = make([]*rpc.ConvoMixMsg, 0, (maxNumMsg / 2))
-		mix.NextPoolMix = make([]*rpc.ConvoMixMsg, 0, maxNumMsg)
-		mix.OutPoolMix = make([]*rpc.ConvoMixMsg, 0, maxNumMsg)
-	}
+	mix.FirstPool = make([]*rpc.ConvoMsg, 0, maxNumMsg)
+	mix.SecPool = make([]*rpc.ConvoMsg, 0, (2 * (maxNumMsg / 3)))
+	mix.ThirdPool = make([]*rpc.ConvoMsg, 0, (maxNumMsg / 2))
+	mix.NextPool = make([]*rpc.ConvoMsg, 0, maxNumMsg)
+	mix.OutPool = make([]*rpc.ConvoMsg, 0, maxNumMsg)
 
 	// Add basis of cover traffic to first pool.
 	err := mix.AddCoverMsgsToPool(true, numClients, numSamples)
@@ -306,12 +286,12 @@ func (mix *Mix) InitNewRound() error {
 // SendOutMsg is the goroutine worker function
 // that expects messages via a channel and sends
 // them to the final outside client.
-func (mix *Mix) SendOutMsg(msgChan chan *rpc.ConvoExitMsg) {
+func (mix *Mix) SendOutMsg(msgChan chan *rpc.ConvoMsg) {
 
 	for exitMsg := range msgChan {
 
 		// Extract network address of outside client.
-		addr, err := exitMsg.ClientAddr()
+		addr, err := exitMsg.PubKeyOrAddr()
 		if err != nil {
 			fmt.Printf("Failed to extract client address of outgoing message: %v\n", err)
 			continue
@@ -325,7 +305,7 @@ func (mix *Mix) SendOutMsg(msgChan chan *rpc.ConvoExitMsg) {
 		}
 
 		// Connect to client node.
-		conn, err := net.Dial("tcp", addr)
+		conn, err := net.Dial("tcp", string(addr))
 		if err != nil {
 			fmt.Printf("Failed sending message to final client '%s': %v\n", addr, err)
 			continue
@@ -356,89 +336,56 @@ func (mix *Mix) RotateRoundState() error {
 	// of cover traffic generation in background.
 	coverGenErrChan := make(chan error)
 
+	// Acquire lock on first pool.
+	mix.muFirstPool.Lock()
+
+	// Rotate first to second, second to third,
+	// and third to outgoing message pool.
+	mix.OutPool = mix.ThirdPool
+	mix.ThirdPool = mix.SecPool
+	mix.SecPool = mix.FirstPool
+
+	// Rotate prepared background message pool
+	// prepopulated with cover messages to
+	// first slot.
+	mix.FirstPool = mix.NextPool
+
+	// Unlock first pool so that the regular
+	// message handlers can continue to insert
+	// mix messages.
+	mix.muFirstPool.Unlock()
+
+	go func(numClients int, numSamples int) {
+
+		// Add basis of cover traffic to background
+		// pool that will become the first pool next
+		// round rotation.
+		err := mix.AddCoverMsgsToPool(false, numClients, numSamples)
+		if err != nil {
+			coverGenErrChan <- err
+		}
+
+		coverGenErrChan <- nil
+
+	}(numClients, numSamples)
+
 	if mix.IsExit {
 
 		// Prepare parallel sending of outgoing
 		// messages to clients.
-		msgChan := make(chan *rpc.ConvoExitMsg, 10000)
+		msgChan := make(chan *rpc.ConvoMsg, 10000)
 		for i := 0; i < 10000; i++ {
 			go mix.SendOutMsg(msgChan)
 		}
 
-		// Acquire lock on first pool.
-		mix.muFirstPool.Lock()
-
-		// Rotate first to second, second to third,
-		// and third to outgoing message pool.
-		mix.OutPoolExit = mix.ThirdPoolExit
-		mix.ThirdPoolExit = mix.SecPoolExit
-		mix.SecPoolExit = mix.FirstPoolExit
-
-		// Rotate prepared background message pool
-		// prepopulated with cover messages to
-		// first slot.
-		mix.FirstPoolExit = mix.NextPoolExit
-
-		// Unlock first pool so that the regular
-		// message handlers can continue to insert
-		// mix messages.
-		mix.muFirstPool.Unlock()
-
-		go func(numClients int, numSamples int) {
-
-			// Add basis of cover traffic to background
-			// pool that will become the first pool next
-			// round rotation.
-			err := mix.AddCoverMsgsToPool(false, numClients, numSamples)
-			if err != nil {
-				coverGenErrChan <- err
-			}
-
-			coverGenErrChan <- nil
-
-		}(numClients, numSamples)
-
 		// Hand over outgoing messages to goroutines
 		// performing the actual sending.
-		for i := range mix.OutPoolExit {
-			msgChan <- mix.OutPoolExit[i]
+		for i := range mix.OutPool {
+			msgChan <- mix.OutPool[i]
 		}
 		close(msgChan)
 
 	} else {
-
-		// Acquire lock on first pool.
-		mix.muFirstPool.Lock()
-
-		// Rotate first to second, second to third,
-		// and third to outgoing message pool.
-		mix.OutPoolMix = mix.ThirdPoolMix
-		mix.ThirdPoolMix = mix.SecPoolMix
-		mix.SecPoolMix = mix.FirstPoolMix
-
-		// Rotate prepared background message pool
-		// prepopulated with cover messages to
-		// first slot.
-		mix.FirstPoolMix = mix.NextPoolMix
-
-		// Unlock first pool so that the regular
-		// message handlers can continue to insert
-		// mix messages.
-		mix.muFirstPool.Unlock()
-
-		go func(numClients int, numSamples int) {
-
-			// Add basis of cover traffic to background
-			// pool that will become the first pool next
-			// round rotation.
-			err := mix.AddCoverMsgsToPool(false, numClients, numSamples)
-			if err != nil {
-				coverGenErrChan <- err
-			}
-
-			coverGenErrChan <- nil
-
-		}(numClients, numSamples)
 
 		// Send batch of conversation messages
 		// to subsequent mix in cascade.
@@ -450,13 +397,13 @@ func (mix *Mix) RotateRoundState() error {
 				return err
 			}
 
-			msgs, err := batch.NewMsgs(int32(len(mix.OutPoolMix)))
+			msgs, err := batch.NewMsgs(int32(len(mix.OutPool)))
 			if err != nil {
 				return err
 			}
 
-			for i := range mix.OutPoolMix {
-				msgs.Set(i, *mix.OutPoolMix[i])
+			for i := range mix.OutPool {
+				msgs.Set(i, *mix.OutPool[i])
 			}
 
 			return nil
@@ -486,7 +433,7 @@ func (mix *Mix) AddConvoMsg(call rpc.Mix_addConvoMsg) error {
 
 	// Extract convo message to append to
 	// mix node's message pools from request.
-	convoMsgRaw, err := call.Params.Msg()
+	encConvoMsgRaw, err := call.Params.Msg()
 	if err != nil {
 
 		fmt.Printf("Error extracting AddConvoMsg request parameters: %v\n", err)
@@ -498,7 +445,7 @@ func (mix *Mix) AddConvoMsg(call rpc.Mix_addConvoMsg) error {
 	// Extract public key used during encryption
 	// of onionized message from convo message.
 	pubKey := new([32]byte)
-	pubKeyRaw, err := convoMsgRaw.PubKey()
+	pubKeyRaw, err := encConvoMsgRaw.PubKeyOrAddr()
 	if err != nil {
 
 		fmt.Printf("Error extracting public key from request: %v\n", err)
@@ -510,7 +457,7 @@ func (mix *Mix) AddConvoMsg(call rpc.Mix_addConvoMsg) error {
 
 	// Extract packed forward message from
 	// received convo message.
-	encConvoMsg, err := convoMsgRaw.Content()
+	encConvoMsg, err := encConvoMsgRaw.Content()
 	if err != nil {
 
 		fmt.Printf("Error extracting message from request: %v\n", err)
@@ -524,10 +471,8 @@ func (mix *Mix) AddConvoMsg(call rpc.Mix_addConvoMsg) error {
 	nonce := new([24]byte)
 	copy(nonce[:], encConvoMsg[:24])
 
-	fmt.Printf("Will decrypt with:\n\tmsg: '%x'\n\tnonce: '%x'\n\tpubKey: '%x'\n\tsecKey: '%x'\n\n", encConvoMsg, *nonce, *pubKey, *mix.RecvSecKey)
-
 	// Decrypt message content.
-	out, ok := box.Open(nil, encConvoMsg[24:], nonce, pubKey, mix.RecvSecKey)
+	convoMsgRaw, ok := box.Open(nil, encConvoMsg[24:], nonce, pubKey, mix.RecvSecKey)
 	if !ok {
 
 		fmt.Printf("Error decrypting received message.\n")
@@ -536,11 +481,9 @@ func (mix *Mix) AddConvoMsg(call rpc.Mix_addConvoMsg) error {
 		return nil
 	}
 
-	fmt.Printf("AddConvoMsg: out of box.Open: %s\n", out)
-
 	// Unmarshal packed convo message from
 	// byte slice to Cap'n Proto message.
-	convoMsgProto, err := capnp.Unmarshal(out)
+	convoMsgProto, err := capnp.Unmarshal(convoMsgRaw)
 	if err != nil {
 
 		fmt.Printf("Error unmarshaling received message: %v\n", err)
@@ -551,7 +494,7 @@ func (mix *Mix) AddConvoMsg(call rpc.Mix_addConvoMsg) error {
 
 	// Convert raw Cap'n Proto message to the
 	// conversation message we defined.
-	convoMsg, err := rpc.ReadRootConvoMixMsg(convoMsgProto)
+	convoMsg, err := rpc.ReadRootConvoMsg(convoMsgProto)
 	if err != nil {
 
 		fmt.Printf("Error reading conversation message from received message: %v\n", err)
@@ -563,7 +506,7 @@ func (mix *Mix) AddConvoMsg(call rpc.Mix_addConvoMsg) error {
 	// Lock first message pool, append
 	// message, and unlock.
 	mix.muFirstPool.Lock()
-	mix.FirstPoolMix = append(mix.FirstPoolMix, &convoMsg)
+	mix.FirstPool = append(mix.FirstPool, &convoMsg)
 	mix.muFirstPool.Unlock()
 
 	// Acknowledge client.

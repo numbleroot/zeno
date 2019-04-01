@@ -3,22 +3,16 @@ using Go = import "/go.capnp";
 $Go.package("rpc");
 $Go.import("github.com/numbleroot/zeno/rpc");
 
-struct ConvoExitMsg {
-    clientAddr @0 :Text;
+struct ConvoMsg {
+    pubKeyOrAddr @0 :Data;
     content @1 :Data;
 }
 
-struct ConvoMixMsg {
-    pubKey @0 :Data;
-    nonce @1 :Data;
-    content @2 :Data;
-}
-
 struct Batch {
-    msgs @0 :List(ConvoMixMsg);
+    msgs @0 :List(ConvoMsg);
 }
 
 interface Mix {
-    addConvoMsg @0 (msg :ConvoMixMsg) -> (status :UInt8);
+    addConvoMsg @0 (msg :ConvoMsg) -> (status :UInt8);
     addBatch @1 (batch :Batch) -> (status :UInt8);
 }

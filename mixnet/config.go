@@ -6,9 +6,14 @@ import "time"
 // duration of accepting messages.
 const RoundTime = 2 * time.Second
 
-// MsgOverhead specifies the amount
-// of overhead in bytes for a message
-// after it has been serialized by
-// Cap'n Proto.
-// TODO: Add number.
-const MsgOverhead = 0
+// ExitMsgOverhead specifies the amount
+// of overhead in bytes for an end user
+// message after it has been serialized
+// by Cap'n Proto.
+const ExitMsgOverhead = 48
+
+// MixMsgOverhead specifies the amount
+// of overhead in bytes for an onionized
+// message after it has been serialized
+// by Cap'n Proto.
+const MixMsgOverhead = 104

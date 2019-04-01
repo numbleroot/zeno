@@ -13,7 +13,7 @@ import (
 // entity on address associated with a
 // public key.
 type Endpoint struct {
-	Addr   string
+	Addr   []byte
 	PubKey *[32]byte
 }
 
@@ -57,21 +57,16 @@ type Client struct {
 // system architecture.
 type Mix struct {
 	*Node
-	OwnChain      int
-	OwnIndex      int
-	IsEntry       bool
-	IsExit        bool
-	Successor     *rpc.Mix
-	RoundTimer    *time.Timer
-	muFirstPool   *sync.Mutex
-	FirstPoolMix  []*rpc.ConvoMixMsg
-	FirstPoolExit []*rpc.ConvoExitMsg
-	SecPoolMix    []*rpc.ConvoMixMsg
-	SecPoolExit   []*rpc.ConvoExitMsg
-	ThirdPoolMix  []*rpc.ConvoMixMsg
-	ThirdPoolExit []*rpc.ConvoExitMsg
-	NextPoolMix   []*rpc.ConvoMixMsg
-	NextPoolExit  []*rpc.ConvoExitMsg
-	OutPoolMix    []*rpc.ConvoMixMsg
-	OutPoolExit   []*rpc.ConvoExitMsg
+	OwnChain    int
+	OwnIndex    int
+	IsEntry     bool
+	IsExit      bool
+	Successor   *rpc.Mix
+	RoundTimer  *time.Timer
+	muFirstPool *sync.Mutex
+	FirstPool   []*rpc.ConvoMsg
+	SecPool     []*rpc.ConvoMsg
+	ThirdPool   []*rpc.ConvoMsg
+	NextPool    []*rpc.ConvoMsg
+	OutPool     []*rpc.ConvoMsg
 }

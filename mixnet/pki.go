@@ -128,7 +128,7 @@ func (node *Node) GetAllClients() error {
 
 		// Append as new Endpoint.
 		node.KnownClients[i] = &Endpoint{
-			Addr:   client[0],
+			Addr:   []byte(client[0]),
 			PubKey: pubKey,
 		}
 	}
@@ -169,14 +169,14 @@ func (node *Node) ConfigureChainMatrix(connRead *bufio.Reader, connWrite net.Con
 		copy(pubKey[:], pubKeyRaw)
 
 		cands[i] = &Endpoint{
-			Addr:   candsParts[0],
+			Addr:   []byte(candsParts[0]),
 			PubKey: pubKey,
 		}
 	}
 
 	// Sort candidates deterministically.
 	sort.Slice(cands, func(i, j int) bool {
-		return cands[i].Addr < cands[j].Addr
+		return string(cands[i].Addr) < string(cands[j].Addr)
 	})
 
 	// TODO: Run VDF over candidates. Output is a

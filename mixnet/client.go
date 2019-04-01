@@ -34,7 +34,7 @@ func (cl *Client) ReconnectToEntries() error {
 	for chain := 0; chain < len(cl.ChainMatrix); chain++ {
 
 		// Connect to each entry mix over TCP.
-		conn, err := net.Dial("tcp", cl.ChainMatrix[chain][0].Addr)
+		conn, err := net.Dial("tcp", string(cl.ChainMatrix[chain][0].Addr))
 		if err != nil {
 			return err
 		}
@@ -52,7 +52,7 @@ func (cl *Client) ReconnectToEntries() error {
 		cl.EntryConns[chain] = entryMix
 	}
 
-	fmt.Printf("Connected to entry mixes\n\n")
+	fmt.Printf("Connected to entry mixes.\n\n")
 
 	return nil
 }
@@ -111,8 +111,6 @@ func (cl *Client) InitNewRound() error {
 // to each respective entry mix.
 func (cl *Client) OnionEncryptAndSend(convoExitMsg []byte, chain int) {
 
-	fmt.Printf("Encrypting message now\n")
-
 	msg := convoExitMsg
 
 	// Going through chains in reverse, encrypt
@@ -133,13 +131,12 @@ func (cl *Client) OnionEncryptAndSend(convoExitMsg []byte, chain int) {
 		}
 
 		// Create new ConvoMixMsg and insert values.
-		convoMixMsg, err := rpc.NewRootConvoMixMsg(protoMsgSeg)
+		convoMixMsg, err := rpc.NewRootConvoMsg(protoMsgSeg)
 		if err != nil {
 			fmt.Printf("Failed creating new root ConvoMixMsg: %v\n", err)
 			os.Exit(1)
 		}
-		convoMixMsg.SetPubKey(cl.CurRound[chain][mix].PubKey[:])
-		convoMixMsg.SetNonce(cl.CurRound[chain][mix].Nonce[:])
+		convoMixMsg.SetPubKeyOrAddr(cl.CurRound[chain][mix].PubKey[:])
 		convoMixMsg.SetContent(encMsg)
 
 		// Marshal final ConvoMixMsg to byte slice.
@@ -152,7 +149,7 @@ func (cl *Client) OnionEncryptAndSend(convoExitMsg []byte, chain int) {
 		fmt.Printf("len(msg) = %d\n", len(msg))
 	}
 
-	fmt.Printf("\nlen(finalMessage) = %d\n", len(msg))
+	fmt.Printf("len(finalMessage) = %d\n", len(msg))
 
 	// Send final layered message to entry mix.
 	status, err := cl.EntryConns[chain].AddConvoMsg(context.Background(), func(p rpc.Mix_addConvoMsg_Params) error {
@@ -161,17 +158,12 @@ func (cl *Client) OnionEncryptAndSend(convoExitMsg []byte, chain int) {
 		// symmetrically encrypt the current message.
 		encMsg := box.SealAfterPrecomputation(cl.CurRound[chain][0].Nonce[:], msg, cl.CurRound[chain][0].Nonce, cl.CurRound[chain][0].SymKey)
 
-		fmt.Printf("Entry pubkey: '%x'\n", *cl.CurRound[chain][0].PubKey)
-		fmt.Printf("Entry nonce: '%x'\n", *cl.CurRound[chain][0].Nonce)
-		fmt.Printf("Entry encrypted msg: '%x'\n", encMsg)
-
 		// Create new entry message and set values.
 		entryConvoMixMsg, err := p.NewMsg()
 		if err != nil {
 			return err
 		}
-		entryConvoMixMsg.SetPubKey(cl.CurRound[chain][0].PubKey[:])
-		entryConvoMixMsg.SetNonce(cl.CurRound[chain][0].Nonce[:])
+		entryConvoMixMsg.SetPubKeyOrAddr(cl.CurRound[chain][0].PubKey[:])
 		entryConvoMixMsg.SetContent(encMsg)
 
 		return nil
@@ -182,9 +174,9 @@ func (cl *Client) OnionEncryptAndSend(convoExitMsg []byte, chain int) {
 	}
 
 	if status.Status() != 0 {
-		fmt.Printf("Received error code %d from entry mix '%s'\n", status.Status(), cl.ChainMatrix[chain][0].Addr)
+		fmt.Printf("Received error code %d from entry mix '%s'\n\n", status.Status(), cl.ChainMatrix[chain][0].Addr)
 	} else {
-		fmt.Printf("Successfully delivered message to entry mix '%s'\n", cl.ChainMatrix[chain][0].Addr)
+		fmt.Printf("Successfully delivered message to entry mix '%s'\n\n", cl.ChainMatrix[chain][0].Addr)
 	}
 
 	cl.SendWG.Done()
@@ -208,8 +200,6 @@ func (cl *Client) SendMsg() error {
 
 	for msg := range tests {
 
-		fmt.Printf("Handling a user message now\n")
-
 		// Prepare the needed new round state,
 		// primarily including fresh key material.
 		err := cl.InitNewRound()
@@ -228,11 +218,11 @@ func (cl *Client) SendMsg() error {
 		}
 
 		// Fill ConvoExitMsg.
-		convoExitMsg, err := rpc.NewRootConvoExitMsg(protoMsgSeg)
+		convoExitMsg, err := rpc.NewRootConvoMsg(protoMsgSeg)
 		if err != nil {
 			return err
 		}
-		convoExitMsg.SetClientAddr("127.0.0.1")
+		convoExitMsg.SetPubKeyOrAddr([]byte("127.0.0.1"))
 		convoExitMsg.SetContent(msgPadded[:])
 
 		// Marshal final ConvoExitMsg to byte slice.
