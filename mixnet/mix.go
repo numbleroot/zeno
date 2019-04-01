@@ -495,10 +495,6 @@ func (mix *Mix) AddConvoMsg(call rpc.Mix_addConvoMsg) error {
 		return nil
 	}
 
-	// Prepare byte slice to fit message.
-	// TODO: Fix size.
-	convoMsgBytes := make([]byte, 2048)
-
 	// Extract public key used during encryption
 	// of onionized message from convo message.
 	pubKey := new([32]byte)
@@ -512,19 +508,6 @@ func (mix *Mix) AddConvoMsg(call rpc.Mix_addConvoMsg) error {
 	}
 	copy(pubKey[:], pubKeyRaw)
 
-	// Extract nonce used during encryption
-	// of onionized message from convo message.
-	nonce := new([24]byte)
-	nonceRaw, err := convoMsgRaw.Nonce()
-	if err != nil {
-
-		fmt.Printf("Error extracting nonce from request: %v\n", err)
-		call.Results.SetStatus(1)
-
-		return err
-	}
-	copy(nonce[:], nonceRaw)
-
 	// Extract packed forward message from
 	// received convo message.
 	encConvoMsg, err := convoMsgRaw.Content()
@@ -536,10 +519,15 @@ func (mix *Mix) AddConvoMsg(call rpc.Mix_addConvoMsg) error {
 		return err
 	}
 
-	fmt.Printf("Will decrypt with:\n\tout: '%s'\n\tmsg: '%s'\n\tnonce: '%s'\n\tpubKey: '%s'\n\tsecKey: '%s'\n\n", convoMsgBytes, encConvoMsg, nonce, pubKey, mix.RecvSecKey)
+	// Extract nonce used during encryption
+	// of onionized message from convo message.
+	nonce := new([24]byte)
+	copy(nonce[:], encConvoMsg[:24])
+
+	fmt.Printf("Will decrypt with:\n\tmsg: '%x'\n\tnonce: '%x'\n\tpubKey: '%x'\n\tsecKey: '%x'\n\n", encConvoMsg, *nonce, *pubKey, *mix.RecvSecKey)
 
 	// Decrypt message content.
-	out, ok := box.Open(convoMsgBytes, encConvoMsg, nonce, pubKey, mix.RecvSecKey)
+	out, ok := box.Open(nil, encConvoMsg[24:], nonce, pubKey, mix.RecvSecKey)
 	if !ok {
 
 		fmt.Printf("Error decrypting received message.\n")
@@ -548,11 +536,11 @@ func (mix *Mix) AddConvoMsg(call rpc.Mix_addConvoMsg) error {
 		return nil
 	}
 
-	fmt.Printf("AddConvoMsg: out of box.Open: %v\n", out)
+	fmt.Printf("AddConvoMsg: out of box.Open: %s\n", out)
 
 	// Unmarshal packed convo message from
 	// byte slice to Cap'n Proto message.
-	convoMsgProto, err := capnp.Unmarshal(convoMsgBytes)
+	convoMsgProto, err := capnp.Unmarshal(out)
 	if err != nil {
 
 		fmt.Printf("Error unmarshaling received message: %v\n", err)

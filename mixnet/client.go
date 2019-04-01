@@ -157,6 +157,14 @@ func (cl *Client) OnionEncryptAndSend(convoExitMsg []byte, chain int) {
 	// Send final layered message to entry mix.
 	status, err := cl.EntryConns[chain].AddConvoMsg(context.Background(), func(p rpc.Mix_addConvoMsg_Params) error {
 
+		// Use precomputed nonce and shared key to
+		// symmetrically encrypt the current message.
+		encMsg := box.SealAfterPrecomputation(cl.CurRound[chain][0].Nonce[:], msg, cl.CurRound[chain][0].Nonce, cl.CurRound[chain][0].SymKey)
+
+		fmt.Printf("Entry pubkey: '%x'\n", *cl.CurRound[chain][0].PubKey)
+		fmt.Printf("Entry nonce: '%x'\n", *cl.CurRound[chain][0].Nonce)
+		fmt.Printf("Entry encrypted msg: '%x'\n", encMsg)
+
 		// Create new entry message and set values.
 		entryConvoMixMsg, err := p.NewMsg()
 		if err != nil {
@@ -164,7 +172,7 @@ func (cl *Client) OnionEncryptAndSend(convoExitMsg []byte, chain int) {
 		}
 		entryConvoMixMsg.SetPubKey(cl.CurRound[chain][0].PubKey[:])
 		entryConvoMixMsg.SetNonce(cl.CurRound[chain][0].Nonce[:])
-		entryConvoMixMsg.SetContent(msg)
+		entryConvoMixMsg.SetContent(encMsg)
 
 		return nil
 
