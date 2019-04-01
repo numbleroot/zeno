@@ -171,6 +171,7 @@ func main() {
 	err = node.GetAllClients()
 	if err != nil {
 		fmt.Printf("Failed retrieving all known clients from PKI: %v\n", err)
+		os.Exit(1)
 	}
 
 	if elected {
@@ -189,9 +190,8 @@ func main() {
 		err := mix.ReconnectToSuccessor()
 		if err != nil {
 			fmt.Printf("Failed to connect to mix node's successor mix: %v\n", err)
+			os.Exit(1)
 		}
-
-		fmt.Printf("Own chain: %d, own index on chain: %d, is entry? %v, is exit? %v\n\n", mix.OwnChain, mix.OwnIndex, mix.IsEntry, mix.IsExit)
 
 		// Initialize state on mix for upcoming round.
 		err = mix.InitNewRound()
@@ -199,6 +199,10 @@ func main() {
 			fmt.Printf("Failed generating cover traffic messages for pool: %v\n", err)
 			os.Exit(1)
 		}
+
+		// Run mix node part of mix-net round
+		// protocol in background.
+		go mix.HandleRound()
 
 		for {
 
@@ -225,12 +229,14 @@ func main() {
 		err = client.ReconnectToEntries()
 		if err != nil {
 			fmt.Printf("Error while connecting to entry mixes: %v\n", err)
+			os.Exit(1)
 		}
 
 		// Handle messaging loop.
 		err = client.SendMsg()
 		if err != nil {
 			fmt.Printf("Error while running client: %v\n", err)
+			os.Exit(1)
 		}
 	}
 

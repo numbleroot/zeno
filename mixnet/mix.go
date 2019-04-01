@@ -257,11 +257,15 @@ func (mix *Mix) InitNewRound() error {
 	}
 	maxNumMsg := numClients + numSamples + 10
 
+	// Prepare map to keep track of the clients
+	// that have already participated in a round.
+	mix.ClientsSeen = make(map[string]bool)
+
 	// Prepare pools for conversation messages.
 	mix.muFirstPool = &sync.Mutex{}
 	mix.FirstPool = make([]*rpc.ConvoMsg, 0, maxNumMsg)
-	mix.SecPool = make([]*rpc.ConvoMsg, 0, (2 * (maxNumMsg / 3)))
-	mix.ThirdPool = make([]*rpc.ConvoMsg, 0, (maxNumMsg / 2))
+	mix.SecPool = make([]*rpc.ConvoMsg, 0, maxNumMsg)
+	mix.ThirdPool = make([]*rpc.ConvoMsg, 0, maxNumMsg)
 	mix.NextPool = make([]*rpc.ConvoMsg, 0, maxNumMsg)
 	mix.OutPool = make([]*rpc.ConvoMsg, 0, maxNumMsg)
 
@@ -278,7 +282,7 @@ func (mix *Mix) InitNewRound() error {
 	}
 
 	// Start timer.
-	mix.RoundTimer = time.NewTimer(RoundTime)
+	mix.RoundTicker = time.NewTicker(RoundTime)
 
 	return nil
 }
@@ -331,6 +335,7 @@ func (mix *Mix) RotateRoundState() error {
 	if numSamples < 100 {
 		numSamples = numClients
 	}
+	maxNumMsg := numClients + numSamples + 10
 
 	// Use channel later to communicate end
 	// of cover traffic generation in background.
@@ -357,6 +362,9 @@ func (mix *Mix) RotateRoundState() error {
 
 	go func(numClients int, numSamples int) {
 
+		// Create new empty slice for upcoming round.
+		mix.NextPool = make([]*rpc.ConvoMsg, 0, maxNumMsg)
+
 		// Add basis of cover traffic to background
 		// pool that will become the first pool next
 		// round rotation.
@@ -368,6 +376,20 @@ func (mix *Mix) RotateRoundState() error {
 		coverGenErrChan <- nil
 
 	}(numClients, numSamples)
+
+	// TODO: Truly randomly permute messages in SecPool.
+
+	// TODO: Choose integer k randomly.
+
+	// TODO: Append last k messages from SecPool to OutPool.
+
+	// TODO: Shrink size of SecPool by k.
+
+	// TODO: Choose integer l randomly, where l << k.
+
+	// TODO: Append last l messages from ThirdPool to OutPool.
+
+	// TODO: Shrink size of ThirdPool by l.
 
 	if mix.IsExit {
 
@@ -427,9 +449,32 @@ func (mix *Mix) RotateRoundState() error {
 	return nil
 }
 
+// HandleRound runs the round-synchronized
+// mix node protocol. That includes the round
+// state rotation at each tick and sending
+// forward either message batches or final
+// client messages.
+func (mix *Mix) HandleRound() {
+
+	for {
+
+		<-mix.RoundTicker.C
+
+		err := mix.RotateRoundState()
+		if err != nil {
+			fmt.Printf("Round rotation failed: %v\n", err)
+		}
+	}
+}
+
 // AddConvoMsg enables a client to deliver
 // a conversation message to an entry mix.
 func (mix *Mix) AddConvoMsg(call rpc.Mix_addConvoMsg) error {
+
+	// TODO: Implement rate limiting by sender address
+	//       to one message per round per cascade.
+	//       Might require us to ditch Cap'n Proto
+	//       for delivering client to entry messages.
 
 	// Extract convo message to append to
 	// mix node's message pools from request.
@@ -451,7 +496,7 @@ func (mix *Mix) AddConvoMsg(call rpc.Mix_addConvoMsg) error {
 		fmt.Printf("Error extracting public key from request: %v\n", err)
 		call.Results.SetStatus(1)
 
-		return err
+		return nil
 	}
 	copy(pubKey[:], pubKeyRaw)
 
@@ -463,7 +508,7 @@ func (mix *Mix) AddConvoMsg(call rpc.Mix_addConvoMsg) error {
 		fmt.Printf("Error extracting message from request: %v\n", err)
 		call.Results.SetStatus(1)
 
-		return err
+		return nil
 	}
 
 	// Extract nonce used during encryption
@@ -489,7 +534,7 @@ func (mix *Mix) AddConvoMsg(call rpc.Mix_addConvoMsg) error {
 		fmt.Printf("Error unmarshaling received message: %v\n", err)
 		call.Results.SetStatus(1)
 
-		return err
+		return nil
 	}
 
 	// Convert raw Cap'n Proto message to the
@@ -500,7 +545,7 @@ func (mix *Mix) AddConvoMsg(call rpc.Mix_addConvoMsg) error {
 		fmt.Printf("Error reading conversation message from received message: %v\n", err)
 		call.Results.SetStatus(1)
 
-		return err
+		return nil
 	}
 
 	// Lock first message pool, append
@@ -526,10 +571,23 @@ func (mix *Mix) AddBatch(call rpc.Mix_addBatch) error {
 		fmt.Printf("Error extracting batch of mix messages from request: %v\n", err)
 		call.Results.SetStatus(1)
 
-		return err
+		return nil
 	}
 
-	fmt.Printf("\nAddBatch req: '%#v'\n", batch)
+	msgs, err := batch.Msgs()
+	if err != nil {
+
+		fmt.Printf("Error extracting messages from batch: %v\n", err)
+		call.Results.SetStatus(1)
+
+		return nil
+	}
+
+	numMsgs := msgs.Len()
+
+	for i := 0; i < numMsgs; i++ {
+		fmt.Printf("msgs[%d]: '%#v'\n", i, msgs.At(i))
+	}
 
 	// Acknowledge predecessor mix.
 	call.Results.SetStatus(0)
