@@ -87,11 +87,6 @@ func (mix *Mix) ReconnectToSuccessor() error {
 // old messages.
 func (mix *Mix) AddCoverMsgsToPool(initFirst bool, numClients int, numSamples int) error {
 
-	poolToInit := mix.NextPool
-	if initFirst {
-		poolToInit = mix.FirstPool
-	}
-
 	// Number of mixes in own cascade until exit.
 	numMixesToEnd := len(mix.ChainMatrix[mix.OwnChain]) - (mix.OwnIndex + 1)
 
@@ -132,7 +127,11 @@ func (mix *Mix) AddCoverMsgsToPool(initFirst bool, numClients int, numSamples in
 
 			// This is an exit mix, thus simply add the
 			// cover message directly to respective pool.
-			poolToInit = append(poolToInit, &convoExitMsg)
+			if initFirst {
+				mix.FirstPool = append(mix.FirstPool, &convoExitMsg)
+			} else {
+				mix.NextPool = append(mix.NextPool, &convoExitMsg)
+			}
 
 		} else {
 
@@ -177,8 +176,6 @@ func (mix *Mix) AddCoverMsgsToPool(initFirst bool, numClients int, numSamples in
 				return err
 			}
 
-			fmt.Printf("len(convoExitMsg) = %d\n", len(msg))
-
 			// Going through chains in reverse, encrypt
 			// ConvoExitMsg symmetrically as content. Pack
 			// into ConvoMixMsg and prepend with used public
@@ -211,8 +208,6 @@ func (mix *Mix) AddCoverMsgsToPool(initFirst bool, numClients int, numSamples in
 					fmt.Printf("Failed marshalling final ConvoMixMsg to []byte: %v\n", err)
 					os.Exit(1)
 				}
-
-				fmt.Printf("len(msg) = %d\n", len(msg))
 			}
 
 			// Use precomputed nonce and shared key to
@@ -237,7 +232,11 @@ func (mix *Mix) AddCoverMsgsToPool(initFirst bool, numClients int, numSamples in
 			convoMixMsg.SetContent(encMsg)
 
 			// Add layered ConvoMixMsg to respective pool.
-			poolToInit = append(poolToInit, &convoMixMsg)
+			if initFirst {
+				mix.FirstPool = append(mix.FirstPool, &convoMixMsg)
+			} else {
+				mix.NextPool = append(mix.NextPool, &convoMixMsg)
+			}
 		}
 	}
 
@@ -321,6 +320,44 @@ func (mix *Mix) SendOutMsg(msgChan chan *rpc.ConvoMsg) {
 	}
 }
 
+func (mix *Mix) PrintPools() {
+
+	fmt.Printf("\n----------\nmix.FirstPool:\n")
+	for i := range mix.FirstPool {
+		k, _ := mix.FirstPool[i].PubKeyOrAddr()
+		fmt.Printf("\t%d = %x\n", i, k)
+	}
+	fmt.Printf("len(mix.FirstPool): %d, cap(mix.FirstPool): %d\n\n", len(mix.FirstPool), cap(mix.FirstPool))
+
+	fmt.Printf("mix.SecPool:\n")
+	for i := range mix.SecPool {
+		k, _ := mix.SecPool[i].PubKeyOrAddr()
+		fmt.Printf("\t%d = %x\n", i, k)
+	}
+	fmt.Printf("len(mix.SecPool): %d, cap(mix.SecPool): %d\n\n", len(mix.SecPool), cap(mix.SecPool))
+
+	fmt.Printf("mix.ThirdPool:\n")
+	for i := range mix.ThirdPool {
+		k, _ := mix.ThirdPool[i].PubKeyOrAddr()
+		fmt.Printf("\t%d = %x\n", i, k)
+	}
+	fmt.Printf("len(mix.ThirdPool): %d, cap(mix.ThirdPool): %d\n\n", len(mix.ThirdPool), cap(mix.ThirdPool))
+
+	fmt.Printf("mix.NextPool:\n")
+	for i := range mix.NextPool {
+		k, _ := mix.NextPool[i].PubKeyOrAddr()
+		fmt.Printf("\t%d = %x\n", i, k)
+	}
+	fmt.Printf("len(mix.NextPool): %d, cap(mix.NextPool): %d\n\n", len(mix.NextPool), cap(mix.NextPool))
+
+	fmt.Printf("mix.OutPool:\n")
+	for i := range mix.OutPool {
+		k, _ := mix.OutPool[i].PubKeyOrAddr()
+		fmt.Printf("\t%d = %x\n", i, k)
+	}
+	fmt.Printf("len(mix.OutPool): %d, cap(mix.OutPool): %d\n----------\n\n", len(mix.OutPool), cap(mix.OutPool))
+}
+
 // RotateRoundState performs the necessary
 // operations to switch from one round to
 // the next. This involves appropriately
@@ -329,6 +366,8 @@ func (mix *Mix) SendOutMsg(msgChan chan *rpc.ConvoMsg) {
 // and preparing the subsequent replacement
 // message pool with cover messages.
 func (mix *Mix) RotateRoundState() error {
+
+	mix.PrintPools()
 
 	numClients := len(mix.KnownClients)
 	numSamples := numClients / 100
@@ -377,9 +416,26 @@ func (mix *Mix) RotateRoundState() error {
 
 	}(numClients, numSamples)
 
-	// TODO: Truly randomly permute messages in SecPool.
+	// Truly randomly permute messages in SecPool.
+	for i := (len(mix.SecPool) - 1); i > 0; i-- {
 
-	// TODO: Choose integer k randomly.
+		// Generate new CSPRNG number smaller than i.
+		jBig, err := rand.Int(rand.Reader, big.NewInt(int64(i)))
+		if err != nil {
+			return err
+		}
+		j := int(jBig.Int64())
+
+		// Swap places i and j in second pool.
+		mix.SecPool[i], mix.SecPool[j] = mix.SecPool[j], mix.SecPool[i]
+	}
+
+	// Choose integer k randomly.
+	kBig, err := rand.Int(rand.Reader, big.NewInt(BatchSizeVariance))
+	if err != nil {
+		return err
+	}
+	k := int(kBig.Int64())
 
 	// TODO: Append last k messages from SecPool to OutPool.
 
@@ -586,7 +642,7 @@ func (mix *Mix) AddBatch(call rpc.Mix_addBatch) error {
 	numMsgs := msgs.Len()
 
 	for i := 0; i < numMsgs; i++ {
-		fmt.Printf("msgs[%d]: '%#v'\n", i, msgs.At(i))
+		// fmt.Printf("msgs[%d]: '%#v'\n", i, msgs.At(i))
 	}
 
 	// Acknowledge predecessor mix.

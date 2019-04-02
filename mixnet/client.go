@@ -145,11 +145,7 @@ func (cl *Client) OnionEncryptAndSend(convoExitMsg []byte, chain int) {
 			fmt.Printf("Failed marshalling final ConvoMixMsg to []byte: %v\n", err)
 			os.Exit(1)
 		}
-
-		fmt.Printf("len(msg) = %d\n", len(msg))
 	}
-
-	fmt.Printf("len(finalMessage) = %d\n", len(msg))
 
 	// Send final layered message to entry mix.
 	status, err := cl.EntryConns[chain].AddConvoMsg(context.Background(), func(p rpc.Mix_addConvoMsg_Params) error {
@@ -230,8 +226,6 @@ func (cl *Client) SendMsg() error {
 		if err != nil {
 			return err
 		}
-
-		fmt.Printf("len(convoExitMsg) = %d\n", len(protoMsgBytes))
 
 		cl.SendWG.Add(len(cl.ChainMatrix))
 

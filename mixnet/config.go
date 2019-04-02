@@ -17,3 +17,9 @@ const ExitMsgOverhead = 48
 // message after it has been serialized
 // by Cap'n Proto.
 const MixMsgOverhead = 104
+
+// BatchSizeVariance defines the maximum
+// amount of messages added additionally
+// to half of the number of messages in
+// a pool to append to the outgoing pool.
+const BatchSizeVariance = 5
