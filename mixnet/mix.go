@@ -367,6 +367,7 @@ func (mix *Mix) PrintPools() {
 // message pool with cover messages.
 func (mix *Mix) RotateRoundState() error {
 
+	fmt.Printf("BEGINNING:")
 	mix.PrintPools()
 
 	numClients := len(mix.KnownClients)
@@ -430,22 +431,56 @@ func (mix *Mix) RotateRoundState() error {
 		mix.SecPool[i], mix.SecPool[j] = mix.SecPool[j], mix.SecPool[i]
 	}
 
-	// Choose integer k randomly.
-	kBig, err := rand.Int(rand.Reader, big.NewInt(BatchSizeVariance))
+	// Choose variance value randomly.
+	varianceBig, err := rand.Int(rand.Reader, big.NewInt(BatchSizeVariance))
 	if err != nil {
 		return err
 	}
-	k := int(kBig.Int64())
+	variance := int(varianceBig.Int64())
 
-	// TODO: Append last k messages from SecPool to OutPool.
+	// Calculate appropriate pool indices. Start is set to half
+	// of the SecPool's length minus the randomly chosen variance
+	// value to introduce some randomness. End is set to include
+	// all elements from start until the end of the pool.
+	end := len(mix.SecPool)
+	start := (end / 2) - variance
+	if start < 0 {
+		start = 0
+	}
 
-	// TODO: Shrink size of SecPool by k.
+	// Append last (end - start) messages from SecPool to OutPool.
+	mix.OutPool = append(mix.OutPool, mix.SecPool[start:end]...)
 
-	// TODO: Choose integer l randomly, where l << k.
+	// Shrink size of SecPool by (end - start).
+	mix.SecPool = mix.SecPool[:start]
 
-	// TODO: Append last l messages from ThirdPool to OutPool.
+	end = len(mix.ThirdPool)
+	start = (end / 2) - variance
+	if start < 0 {
+		start = 0
+	}
 
-	// TODO: Shrink size of ThirdPool by l.
+	// Append last (end - start) messages from ThirdPool to OutPool.
+	mix.OutPool = append(mix.OutPool, mix.ThirdPool[start:end]...)
+
+	// Shrink size of ThirdPool by (end - start).
+	mix.ThirdPool = mix.ThirdPool[:start]
+
+	// Randomly permute OutPool once more to destroy any potential
+	// for linking the order in the outgoing message batch to a
+	// message's relationship to one of the pools.
+	for i := (len(mix.OutPool) - 1); i > 0; i-- {
+
+		// Generate new CSPRNG number smaller than i.
+		jBig, err := rand.Int(rand.Reader, big.NewInt(int64(i)))
+		if err != nil {
+			return err
+		}
+		j := int(jBig.Int64())
+
+		// Swap places i and j in outgoing message pool.
+		mix.OutPool[i], mix.OutPool[j] = mix.OutPool[j], mix.OutPool[i]
+	}
 
 	if mix.IsExit {
 
@@ -497,7 +532,7 @@ func (mix *Mix) RotateRoundState() error {
 	}
 
 	// Wait for cover traffic generation to finish.
-	err := <-coverGenErrChan
+	err = <-coverGenErrChan
 	if err != nil {
 		return err
 	}
