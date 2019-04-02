@@ -320,44 +320,6 @@ func (mix *Mix) SendOutMsg(msgChan chan *rpc.ConvoMsg) {
 	}
 }
 
-func (mix *Mix) PrintPools() {
-
-	fmt.Printf("\n----------\nmix.FirstPool:\n")
-	for i := range mix.FirstPool {
-		k, _ := mix.FirstPool[i].PubKeyOrAddr()
-		fmt.Printf("\t%d = %x\n", i, k)
-	}
-	fmt.Printf("len(mix.FirstPool): %d, cap(mix.FirstPool): %d\n\n", len(mix.FirstPool), cap(mix.FirstPool))
-
-	fmt.Printf("mix.SecPool:\n")
-	for i := range mix.SecPool {
-		k, _ := mix.SecPool[i].PubKeyOrAddr()
-		fmt.Printf("\t%d = %x\n", i, k)
-	}
-	fmt.Printf("len(mix.SecPool): %d, cap(mix.SecPool): %d\n\n", len(mix.SecPool), cap(mix.SecPool))
-
-	fmt.Printf("mix.ThirdPool:\n")
-	for i := range mix.ThirdPool {
-		k, _ := mix.ThirdPool[i].PubKeyOrAddr()
-		fmt.Printf("\t%d = %x\n", i, k)
-	}
-	fmt.Printf("len(mix.ThirdPool): %d, cap(mix.ThirdPool): %d\n\n", len(mix.ThirdPool), cap(mix.ThirdPool))
-
-	fmt.Printf("mix.NextPool:\n")
-	for i := range mix.NextPool {
-		k, _ := mix.NextPool[i].PubKeyOrAddr()
-		fmt.Printf("\t%d = %x\n", i, k)
-	}
-	fmt.Printf("len(mix.NextPool): %d, cap(mix.NextPool): %d\n\n", len(mix.NextPool), cap(mix.NextPool))
-
-	fmt.Printf("mix.OutPool:\n")
-	for i := range mix.OutPool {
-		k, _ := mix.OutPool[i].PubKeyOrAddr()
-		fmt.Printf("\t%d = %x\n", i, k)
-	}
-	fmt.Printf("len(mix.OutPool): %d, cap(mix.OutPool): %d\n----------\n\n", len(mix.OutPool), cap(mix.OutPool))
-}
-
 // RotateRoundState performs the necessary
 // operations to switch from one round to
 // the next. This involves appropriately
@@ -367,8 +329,7 @@ func (mix *Mix) PrintPools() {
 // message pool with cover messages.
 func (mix *Mix) RotateRoundState() error {
 
-	fmt.Printf("BEGINNING:")
-	mix.PrintPools()
+	mix.printPools()
 
 	numClients := len(mix.KnownClients)
 	numSamples := numClients / 100
@@ -572,7 +533,7 @@ func (mix *Mix) AddConvoMsg(call rpc.Mix_addConvoMsg) error {
 	encConvoMsgRaw, err := call.Params.Msg()
 	if err != nil {
 
-		fmt.Printf("Error extracting AddConvoMsg request parameters: %v\n", err)
+		fmt.Printf("Error extracting envelope message from request: %v\n", err)
 		call.Results.SetStatus(1)
 
 		return nil
@@ -584,7 +545,7 @@ func (mix *Mix) AddConvoMsg(call rpc.Mix_addConvoMsg) error {
 	pubKeyRaw, err := encConvoMsgRaw.PubKeyOrAddr()
 	if err != nil {
 
-		fmt.Printf("Error extracting public key from request: %v\n", err)
+		fmt.Printf("Error extracting public key from envelope message: %v\n", err)
 		call.Results.SetStatus(1)
 
 		return nil
@@ -596,7 +557,7 @@ func (mix *Mix) AddConvoMsg(call rpc.Mix_addConvoMsg) error {
 	encConvoMsg, err := encConvoMsgRaw.Content()
 	if err != nil {
 
-		fmt.Printf("Error extracting message from request: %v\n", err)
+		fmt.Printf("Error extracting message from envelope message: %v\n", err)
 		call.Results.SetStatus(1)
 
 		return nil
@@ -611,7 +572,7 @@ func (mix *Mix) AddConvoMsg(call rpc.Mix_addConvoMsg) error {
 	convoMsgRaw, ok := box.Open(nil, encConvoMsg[24:], nonce, pubKey, mix.RecvSecKey)
 	if !ok {
 
-		fmt.Printf("Error decrypting received message.\n")
+		fmt.Printf("Error decrypting received envelope message.\n")
 		call.Results.SetStatus(1)
 
 		return nil
@@ -622,7 +583,7 @@ func (mix *Mix) AddConvoMsg(call rpc.Mix_addConvoMsg) error {
 	convoMsgProto, err := capnp.Unmarshal(convoMsgRaw)
 	if err != nil {
 
-		fmt.Printf("Error unmarshaling received message: %v\n", err)
+		fmt.Printf("Error unmarshaling received contained message: %v\n", err)
 		call.Results.SetStatus(1)
 
 		return nil
@@ -633,7 +594,7 @@ func (mix *Mix) AddConvoMsg(call rpc.Mix_addConvoMsg) error {
 	convoMsg, err := rpc.ReadRootConvoMsg(convoMsgProto)
 	if err != nil {
 
-		fmt.Printf("Error reading conversation message from received message: %v\n", err)
+		fmt.Printf("Error reading conversation message from contained message: %v\n", err)
 		call.Results.SetStatus(1)
 
 		return nil
@@ -656,28 +617,98 @@ func (mix *Mix) AddConvoMsg(call rpc.Mix_addConvoMsg) error {
 // to a subsequent mix node.
 func (mix *Mix) AddBatch(call rpc.Mix_addBatch) error {
 
-	batch, err := call.Params.Batch()
+	// Extract batch of messages from request.
+	msgBatch, err := call.Params.Batch()
 	if err != nil {
 
-		fmt.Printf("Error extracting batch of mix messages from request: %v\n", err)
+		fmt.Printf("Error extracting message batch from request: %v\n", err)
 		call.Results.SetStatus(1)
 
 		return nil
 	}
 
-	msgs, err := batch.Msgs()
+	// Retrieve list of messages from batch struct.
+	encConvoMsgsRaw, err := msgBatch.Msgs()
 	if err != nil {
 
-		fmt.Printf("Error extracting messages from batch: %v\n", err)
+		fmt.Printf("Error extracting envelope messages from batch: %v\n", err)
 		call.Results.SetStatus(1)
 
 		return nil
 	}
 
-	numMsgs := msgs.Len()
+	numMsgs := encConvoMsgsRaw.Len()
 
 	for i := 0; i < numMsgs; i++ {
-		// fmt.Printf("msgs[%d]: '%#v'\n", i, msgs.At(i))
+
+		encConvoMsgRaw := encConvoMsgsRaw.At(i)
+
+		// Extract public key used during encryption
+		// of onionized message from convo message.
+		pubKey := new([32]byte)
+		pubKeyRaw, err := encConvoMsgRaw.PubKeyOrAddr()
+		if err != nil {
+
+			fmt.Printf("Error extracting public key from envelope message: %v\n", err)
+			call.Results.SetStatus(1)
+
+			return nil
+		}
+		copy(pubKey[:], pubKeyRaw)
+
+		// Extract packed forward message from
+		// received convo message.
+		encConvoMsg, err := encConvoMsgRaw.Content()
+		if err != nil {
+
+			fmt.Printf("Error extracting message from envelope message: %v\n", err)
+			call.Results.SetStatus(1)
+
+			return nil
+		}
+
+		// Extract nonce used during encryption
+		// of onionized message from convo message.
+		nonce := new([24]byte)
+		copy(nonce[:], encConvoMsg[:24])
+
+		// Decrypt message content.
+		convoMsgRaw, ok := box.Open(nil, encConvoMsg[24:], nonce, pubKey, mix.RecvSecKey)
+		if !ok {
+
+			fmt.Printf("Error decrypting received envelope message.\n")
+			call.Results.SetStatus(1)
+
+			return nil
+		}
+
+		// Unmarshal packed convo message from
+		// byte slice to Cap'n Proto message.
+		convoMsgProto, err := capnp.Unmarshal(convoMsgRaw)
+		if err != nil {
+
+			fmt.Printf("Error unmarshaling received contained message: %v\n", err)
+			call.Results.SetStatus(1)
+
+			return nil
+		}
+
+		// Convert raw Cap'n Proto message to the
+		// conversation message we defined.
+		convoMsg, err := rpc.ReadRootConvoMsg(convoMsgProto)
+		if err != nil {
+
+			fmt.Printf("Error reading conversation message from contained message: %v\n", err)
+			call.Results.SetStatus(1)
+
+			return nil
+		}
+
+		// Lock first message pool, append
+		// message, and unlock.
+		mix.muFirstPool.Lock()
+		mix.FirstPool = append(mix.FirstPool, &convoMsg)
+		mix.muFirstPool.Unlock()
 	}
 
 	// Acknowledge predecessor mix.
