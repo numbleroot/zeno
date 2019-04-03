@@ -241,13 +241,6 @@ func main() {
 			SendWG: &sync.WaitGroup{},
 		}
 
-		// Connect to all entry mixes in chain matrix.
-		err = client.ReconnectToEntries()
-		if err != nil {
-			fmt.Printf("Error while connecting to entry mixes: %v\n", err)
-			os.Exit(1)
-		}
-
 		// Handle messaging loop.
 		err = client.SendMsg()
 		if err != nil {

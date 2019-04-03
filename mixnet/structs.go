@@ -27,6 +27,16 @@ type OnionKeyState struct {
 	SymKey *[32]byte
 }
 
+// ConvoMsg represents the struct to be sent
+// from client to entry mix containing the
+// public key used to encrypt the first onion
+// layer, the message itself, and within the
+// message also the nonce used to encrypt.
+type ConvoMsg struct {
+	PublicKey *[32]byte
+	Content   []byte
+}
+
 // Node collects the basic information
 // any node in our system works with.
 type Node struct {

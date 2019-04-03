@@ -1,61 +1,20 @@
 package mixnet
 
 import (
-	"context"
+	"bufio"
 	"crypto/rand"
+	"encoding/gob"
 	"fmt"
 	"io"
 	"net"
 	"os"
+	"strings"
 
 	"golang.org/x/crypto/nacl/box"
 
 	"github.com/numbleroot/zeno/rpc"
 	capnp "zombiezen.com/go/capnproto2"
-	capnprpc "zombiezen.com/go/capnproto2/rpc"
 )
-
-// ReconnectToEntries opens up new RPC connections
-// over TCP to each entry mix in the chain matrix.
-func (cl *Client) ReconnectToEntries() error {
-
-	for c := range cl.EntryConns {
-
-		// Close all entry mix connections from last epoch.
-		err := cl.EntryConns[c].Client.Close()
-		if err != nil {
-			fmt.Printf("Error while closing old entry mix connections: %v\n", err)
-		}
-	}
-
-	// Make space for the ones from this epoch.
-	cl.EntryConns = make([]*rpc.Mix, len(cl.ChainMatrix))
-
-	for chain := 0; chain < len(cl.ChainMatrix); chain++ {
-
-		// Connect to each entry mix over TCP.
-		conn, err := net.Dial("tcp", string(cl.ChainMatrix[chain][0].Addr))
-		if err != nil {
-			return err
-		}
-
-		// Wrap TCP connection in Cap'n Proto RPC.
-		connRCP := capnprpc.NewConn(capnprpc.StreamTransport(conn))
-
-		// Bundle RPC connection in struct on
-		// which to call methods later on.
-		entryMix := &rpc.Mix{
-			Client: connRCP.Bootstrap(context.Background()),
-		}
-
-		// Stash bundle in client.
-		cl.EntryConns[chain] = entryMix
-	}
-
-	fmt.Printf("Connected to entry mixes.\n\n")
-
-	return nil
-}
 
 // InitNewRound on clients takes care of
 // rotating the current round state to be
@@ -109,14 +68,38 @@ func (cl *Client) InitNewRound() error {
 // A client uses this function to reverse-encrypt
 // a message for the assigned chain and send it off
 // to each respective entry mix.
-func (cl *Client) OnionEncryptAndSend(convoExitMsg []byte, chain int) {
+func (cl *Client) OnionEncryptAndSend(text string, recipient string, chain int) {
 
-	msg := convoExitMsg
+	// Pad message to fixed length.
+	msgPadded := new([280]byte)
+	copy(msgPadded[:], text)
 
-	// Going through chains in reverse, encrypt
-	// ConvoExitMsg symmetrically as content. Pack
-	// into ConvoMixMsg and prepend with used public
-	// key and nonce.
+	// Create empty Cap'n Proto messsage.
+	protoMsg, protoMsgSeg, err := capnp.NewMessage(capnp.SingleSegment(nil))
+	if err != nil {
+		fmt.Printf("Failed creating empty Cap'n Proto message: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Fill message with used values.
+	convoMsg, err := rpc.NewRootConvoMsg(protoMsgSeg)
+	if err != nil {
+		fmt.Printf("Failed creating new root ConvoMsg: %v\n", err)
+		os.Exit(1)
+	}
+	convoMsg.SetPubKeyOrAddr([]byte(recipient))
+	convoMsg.SetContent(msgPadded[:])
+
+	// Marshal final convoMsg to byte slice.
+	msg, err := protoMsg.Marshal()
+	if err != nil {
+		fmt.Printf("Failed marshalling ConvoMsg to []byte: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Going through chains in reverse, encrypt the
+	// message symmetrically as content. Pack into
+	// ConvoMsg and prepend with used public key.
 	for mix := (len(cl.ChainMatrix[chain]) - 1); mix > 0; mix-- {
 
 		// Use precomputed nonce and shared key to
@@ -130,47 +113,65 @@ func (cl *Client) OnionEncryptAndSend(convoExitMsg []byte, chain int) {
 			os.Exit(1)
 		}
 
-		// Create new ConvoMixMsg and insert values.
-		convoMixMsg, err := rpc.NewRootConvoMsg(protoMsgSeg)
+		// Create new ConvoMsg and insert values.
+		onionMsg, err := rpc.NewRootConvoMsg(protoMsgSeg)
 		if err != nil {
-			fmt.Printf("Failed creating new root ConvoMixMsg: %v\n", err)
+			fmt.Printf("Failed creating new root ConvoMsg: %v\n", err)
 			os.Exit(1)
 		}
-		convoMixMsg.SetPubKeyOrAddr(cl.CurRound[chain][mix].PubKey[:])
-		convoMixMsg.SetContent(encMsg)
+		onionMsg.SetPubKeyOrAddr(cl.CurRound[chain][mix].PubKey[:])
+		onionMsg.SetContent(encMsg)
 
-		// Marshal final ConvoMixMsg to byte slice.
+		// Marshal final ConvoMsg to byte slice.
 		msg, err = protoMsg.Marshal()
 		if err != nil {
-			fmt.Printf("Failed marshalling final ConvoMixMsg to []byte: %v\n", err)
+			fmt.Printf("Failed marshalling ConvoMsg to []byte: %v\n", err)
 			os.Exit(1)
 		}
 	}
 
-	// Send final layered message to entry mix.
-	status, err := cl.EntryConns[chain].AddConvoMsg(context.Background(), func(p rpc.Mix_addConvoMsg_Params) error {
+	// Use precomputed nonce and shared key to
+	// symmetrically encrypt the current message.
+	encMsg := box.SealAfterPrecomputation(cl.CurRound[chain][0].Nonce[:], msg, cl.CurRound[chain][0].Nonce, cl.CurRound[chain][0].SymKey)
 
-		// Use precomputed nonce and shared key to
-		// symmetrically encrypt the current message.
-		encMsg := box.SealAfterPrecomputation(cl.CurRound[chain][0].Nonce[:], msg, cl.CurRound[chain][0].Nonce, cl.CurRound[chain][0].SymKey)
+	// Connect to this cascade's entry mix over TCP.
+	connWrite, err := net.Dial("tcp", string(cl.ChainMatrix[chain][0].Addr))
+	if err != nil {
+		fmt.Printf("Failed connecting to entry mix of cascade %d: %v\n", chain, err)
+		os.Exit(1)
+	}
+	defer connWrite.Close()
 
-		// Create new entry message and set values.
-		entryConvoMixMsg, err := p.NewMsg()
-		if err != nil {
-			return err
-		}
-		entryConvoMixMsg.SetPubKeyOrAddr(cl.CurRound[chain][0].PubKey[:])
-		entryConvoMixMsg.SetContent(encMsg)
+	// Create buffered I/O reader from connection.
+	connRead := bufio.NewReader(connWrite)
 
-		return nil
+	// Wrap TCP connection in efficient encoder
+	// for transmitting structs.
+	encoder := gob.NewEncoder(connWrite)
 
-	}).Struct()
+	// Encode and send conversation message to
+	// this cascade's entry mix.
+	err = encoder.Encode(ConvoMsg{
+		PublicKey: cl.CurRound[chain][0].PubKey,
+		Content:   encMsg,
+	})
 	if err != nil {
 		fmt.Printf("Error while sending onion-encrypted message to entry mix %s: %v\n", cl.ChainMatrix[chain][0].Addr, err)
+		os.Exit(1)
 	}
 
-	if status.Status() != 0 {
-		fmt.Printf("Received error code %d from entry mix '%s'\n\n", status.Status(), cl.ChainMatrix[chain][0].Addr)
+	// Wait for acknowledgement.
+	statusRaw, err := connRead.ReadString('\n')
+	if err != nil {
+		fmt.Printf("Failed to receive response to delivery of conversation message: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Parse string into slice of Endpoint.
+	status := strings.ToLower(strings.Trim(statusRaw, "\n "))
+
+	if status != "0" {
+		fmt.Printf("Received error code %v from entry mix '%s'\n\n", status, cl.ChainMatrix[chain][0].Addr)
 	} else {
 		fmt.Printf("Successfully delivered message to entry mix '%s'\n\n", cl.ChainMatrix[chain][0].Addr)
 	}
@@ -203,36 +204,12 @@ func (cl *Client) SendMsg() error {
 			return err
 		}
 
-		// Pad message to fixed length.
-		var msgPadded [280]byte
-		copy(msgPadded[:], tests[msg])
-
-		// Create empty Cap'n Proto messsage.
-		protoMsg, protoMsgSeg, err := capnp.NewMessage(capnp.SingleSegment(nil))
-		if err != nil {
-			return err
-		}
-
-		// Fill ConvoExitMsg.
-		convoExitMsg, err := rpc.NewRootConvoMsg(protoMsgSeg)
-		if err != nil {
-			return err
-		}
-		convoExitMsg.SetPubKeyOrAddr([]byte("127.0.0.1"))
-		convoExitMsg.SetContent(msgPadded[:])
-
-		// Marshal final ConvoExitMsg to byte slice.
-		protoMsgBytes, err := protoMsg.Marshal()
-		if err != nil {
-			return err
-		}
-
 		cl.SendWG.Add(len(cl.ChainMatrix))
 
 		// In parallel, reverse onion-encrypt the
-		// ConvoExitMsg and send to all entry mixes.
+		// message and send to all entry mixes.
 		for chain := range cl.ChainMatrix {
-			go cl.OnionEncryptAndSend(protoMsgBytes, chain)
+			go cl.OnionEncryptAndSend(tests[msg], "127.0.0.1:11111", chain)
 		}
 
 		// Wait for all entry messages to be sent.

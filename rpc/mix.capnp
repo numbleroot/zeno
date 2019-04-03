@@ -13,5 +13,5 @@ struct Batch {
 }
 
 interface Mix {
-    addBatch @1 (batch :Batch) -> (status :UInt8);
+    addBatch @0 (batch :Batch) -> (status :UInt8);
 }

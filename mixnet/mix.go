@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/gob"
 	"fmt"
 	"io"
 	"math/big"
@@ -533,68 +534,46 @@ func (mix *Mix) RotateRoundState() {
 // a conversation message to an entry mix.
 func (mix *Mix) AddConvoMsg(connRead *bufio.Reader, connWrite net.Conn) {
 
+	defer connWrite.Close()
+
 	// Extract sender address from request.
 	sender := connWrite.RemoteAddr().String()
 
-	// Extract convo message to append to
-	// mix node's message pools from request.
-	encConvoMsgRaw, err := call.Params.Msg()
+	// Wrap TCP connection from client in
+	// efficient decoder for ConvoMsg structs.
+	decoder := gob.NewDecoder(connWrite)
+
+	// Expect to receive a ConvoMsg struct.
+	encConvoMsg := &ConvoMsg{}
+	err := decoder.Decode(encConvoMsg)
 	if err != nil {
-
-		fmt.Printf("Error extracting envelope message from request: %v\n", err)
-		call.Results.SetStatus(1)
-
-		return nil
+		fmt.Printf("Error decoding struct received from client: %v\n", err)
+		fmt.Fprintf(connWrite, "%v\n", err)
+		return
 	}
 
-	// Extract public key used during encryption
-	// of onionized message from convo message.
-	pubKey := new([32]byte)
-	pubKeyRaw, err := encConvoMsgRaw.PubKeyOrAddr()
-	if err != nil {
-
-		fmt.Printf("Error extracting public key from envelope message: %v\n", err)
-		call.Results.SetStatus(1)
-
-		return nil
-	}
-	copy(pubKey[:], pubKeyRaw)
-
-	// Extract packed forward message from
-	// received convo message.
-	encConvoMsg, err := encConvoMsgRaw.Content()
-	if err != nil {
-
-		fmt.Printf("Error extracting message from envelope message: %v\n", err)
-		call.Results.SetStatus(1)
-
-		return nil
-	}
+	fmt.Printf("Received the following conversation message from %s:\n\tPubKey: '%x'\n\tContent: '%#v'\n\n", sender, *encConvoMsg.PublicKey, encConvoMsg.Content)
 
 	// Extract nonce used during encryption
 	// of onionized message from convo message.
 	nonce := new([24]byte)
-	copy(nonce[:], encConvoMsg[:24])
+	copy(nonce[:], encConvoMsg.Content[:24])
 
 	// Decrypt message content.
-	convoMsgRaw, ok := box.Open(nil, encConvoMsg[24:], nonce, pubKey, mix.RecvSecKey)
+	convoMsgRaw, ok := box.Open(nil, encConvoMsg.Content[24:], nonce, encConvoMsg.PublicKey, mix.RecvSecKey)
 	if !ok {
-
-		fmt.Printf("Error decrypting received envelope message.\n")
-		call.Results.SetStatus(1)
-
-		return nil
+		fmt.Printf("Failed to decrypt received conversation message by client %s\n", sender)
+		fmt.Fprintf(connWrite, "1\n")
+		return
 	}
 
 	// Unmarshal packed convo message from
 	// byte slice to Cap'n Proto message.
 	convoMsgProto, err := capnp.Unmarshal(convoMsgRaw)
 	if err != nil {
-
-		fmt.Printf("Error unmarshaling received contained message: %v\n", err)
-		call.Results.SetStatus(1)
-
-		return nil
+		fmt.Printf("Error unmarshaling received contained message by client %s: %v\n", sender, err)
+		fmt.Fprintf(connWrite, "1\n")
+		return
 	}
 
 	// Convert raw Cap'n Proto message to the
@@ -602,20 +581,19 @@ func (mix *Mix) AddConvoMsg(connRead *bufio.Reader, connWrite net.Conn) {
 	convoMsg, err := rpc.ReadRootConvoMsg(convoMsgProto)
 	if err != nil {
 
-		fmt.Printf("Error reading conversation message from contained message: %v\n", err)
-		call.Results.SetStatus(1)
-
-		return nil
+		fmt.Printf("Error reading conversation message from contained message by client %s: %v\n", sender, err)
+		fmt.Fprintf(connWrite, "1\n")
+		return
 	}
 
 	mix.muAddMsgs.Lock()
 
-	alreadySentInRound, _ = mix.ClientsSeen[sender]
+	alreadySentInRound, _ := mix.ClientsSeen[sender]
 	if alreadySentInRound {
 
 		mix.muAddMsgs.Unlock()
 
-		fmt.Fprintf(connWrite, "wait\n")
+		fmt.Fprintf(connWrite, "2\n")
 		return
 	}
 
@@ -626,8 +604,6 @@ func (mix *Mix) AddConvoMsg(connRead *bufio.Reader, connWrite net.Conn) {
 
 	// Acknowledge client.
 	fmt.Fprintf(connWrite, "0\n")
-
-	return nil
 }
 
 // AddBatch performs the necessary steps for
