@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/nacl/box"
 
@@ -97,83 +98,90 @@ func (cl *Client) OnionEncryptAndSend(text string, recipient string, chain int) 
 		os.Exit(1)
 	}
 
-	// Going through chains in reverse, encrypt the
-	// message symmetrically as content. Pack into
-	// ConvoMsg and prepend with used public key.
-	for mix := (len(cl.ChainMatrix[chain]) - 1); mix > 0; mix-- {
+	var status string
+
+	for status != "0" {
+
+		// Going through chains in reverse, encrypt the
+		// message symmetrically as content. Pack into
+		// ConvoMsg and prepend with used public key.
+		for mix := (len(cl.ChainMatrix[chain]) - 1); mix > 0; mix-- {
+
+			// Use precomputed nonce and shared key to
+			// symmetrically encrypt the current message.
+			encMsg := box.SealAfterPrecomputation(cl.CurRound[chain][mix].Nonce[:], msg, cl.CurRound[chain][mix].Nonce, cl.CurRound[chain][mix].SymKey)
+
+			// Create empty Cap'n Proto messsage.
+			protoMsg, protoMsgSeg, err := capnp.NewMessage(capnp.SingleSegment(nil))
+			if err != nil {
+				fmt.Printf("Failed creating empty Cap'n Proto message: %v\n", err)
+				os.Exit(1)
+			}
+
+			// Create new ConvoMsg and insert values.
+			onionMsg, err := rpc.NewRootConvoMsg(protoMsgSeg)
+			if err != nil {
+				fmt.Printf("Failed creating new root ConvoMsg: %v\n", err)
+				os.Exit(1)
+			}
+			onionMsg.SetPubKeyOrAddr(cl.CurRound[chain][mix].PubKey[:])
+			onionMsg.SetContent(encMsg)
+
+			// Marshal final ConvoMsg to byte slice.
+			msg, err = protoMsg.Marshal()
+			if err != nil {
+				fmt.Printf("Failed marshalling ConvoMsg to []byte: %v\n", err)
+				os.Exit(1)
+			}
+		}
 
 		// Use precomputed nonce and shared key to
 		// symmetrically encrypt the current message.
-		encMsg := box.SealAfterPrecomputation(cl.CurRound[chain][mix].Nonce[:], msg, cl.CurRound[chain][mix].Nonce, cl.CurRound[chain][mix].SymKey)
+		encMsg := box.SealAfterPrecomputation(cl.CurRound[chain][0].Nonce[:], msg, cl.CurRound[chain][0].Nonce, cl.CurRound[chain][0].SymKey)
 
-		// Create empty Cap'n Proto messsage.
-		protoMsg, protoMsgSeg, err := capnp.NewMessage(capnp.SingleSegment(nil))
+		// Connect to this cascade's entry mix over TCP.
+		connWrite, err := net.Dial("tcp", string(cl.ChainMatrix[chain][0].Addr))
 		if err != nil {
-			fmt.Printf("Failed creating empty Cap'n Proto message: %v\n", err)
+			fmt.Printf("Failed connecting to entry mix of cascade %d: %v\n", chain, err)
+			os.Exit(1)
+		}
+		defer connWrite.Close()
+
+		// Create buffered I/O reader from connection.
+		connRead := bufio.NewReader(connWrite)
+
+		// Wrap TCP connection in efficient encoder
+		// for transmitting structs.
+		encoder := gob.NewEncoder(connWrite)
+
+		// Encode and send conversation message to
+		// this cascade's entry mix.
+		err = encoder.Encode(ConvoMsg{
+			PubKey:  cl.CurRound[chain][0].PubKey,
+			Content: encMsg,
+		})
+		if err != nil {
+			fmt.Printf("Error while sending onion-encrypted message to entry mix %s: %v\n", cl.ChainMatrix[chain][0].Addr, err)
 			os.Exit(1)
 		}
 
-		// Create new ConvoMsg and insert values.
-		onionMsg, err := rpc.NewRootConvoMsg(protoMsgSeg)
+		// Wait for acknowledgement.
+		status, err = connRead.ReadString('\n')
 		if err != nil {
-			fmt.Printf("Failed creating new root ConvoMsg: %v\n", err)
+			fmt.Printf("Failed to receive response to delivery of conversation message: %v\n", err)
 			os.Exit(1)
 		}
-		onionMsg.SetPubKeyOrAddr(cl.CurRound[chain][mix].PubKey[:])
-		onionMsg.SetContent(encMsg)
 
-		// Marshal final ConvoMsg to byte slice.
-		msg, err = protoMsg.Marshal()
-		if err != nil {
-			fmt.Printf("Failed marshalling ConvoMsg to []byte: %v\n", err)
-			os.Exit(1)
+		// Clean up received status string.
+		status = strings.ToLower(strings.Trim(status, "\n "))
+
+		if status != "0" {
+			fmt.Printf("Received error code %v from entry mix '%s', will try again... ", status, cl.ChainMatrix[chain][0].Addr)
+			time.Sleep((((RoundTime) / 2) + (50 * time.Millisecond)))
+			fmt.Printf("now!\n\n")
+		} else {
+			fmt.Printf("Successfully delivered message to entry mix '%s', moving on to next message.\n\n", cl.ChainMatrix[chain][0].Addr)
 		}
-	}
-
-	// Use precomputed nonce and shared key to
-	// symmetrically encrypt the current message.
-	encMsg := box.SealAfterPrecomputation(cl.CurRound[chain][0].Nonce[:], msg, cl.CurRound[chain][0].Nonce, cl.CurRound[chain][0].SymKey)
-
-	// Connect to this cascade's entry mix over TCP.
-	connWrite, err := net.Dial("tcp", string(cl.ChainMatrix[chain][0].Addr))
-	if err != nil {
-		fmt.Printf("Failed connecting to entry mix of cascade %d: %v\n", chain, err)
-		os.Exit(1)
-	}
-	defer connWrite.Close()
-
-	// Create buffered I/O reader from connection.
-	connRead := bufio.NewReader(connWrite)
-
-	// Wrap TCP connection in efficient encoder
-	// for transmitting structs.
-	encoder := gob.NewEncoder(connWrite)
-
-	// Encode and send conversation message to
-	// this cascade's entry mix.
-	err = encoder.Encode(ConvoMsg{
-		PublicKey: cl.CurRound[chain][0].PubKey,
-		Content:   encMsg,
-	})
-	if err != nil {
-		fmt.Printf("Error while sending onion-encrypted message to entry mix %s: %v\n", cl.ChainMatrix[chain][0].Addr, err)
-		os.Exit(1)
-	}
-
-	// Wait for acknowledgement.
-	statusRaw, err := connRead.ReadString('\n')
-	if err != nil {
-		fmt.Printf("Failed to receive response to delivery of conversation message: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Parse string into slice of Endpoint.
-	status := strings.ToLower(strings.Trim(statusRaw, "\n "))
-
-	if status != "0" {
-		fmt.Printf("Received error code %v from entry mix '%s'\n\n", status, cl.ChainMatrix[chain][0].Addr)
-	} else {
-		fmt.Printf("Successfully delivered message to entry mix '%s'\n\n", cl.ChainMatrix[chain][0].Addr)
 	}
 
 	cl.SendWG.Done()
@@ -185,23 +193,27 @@ func (cl *Client) OnionEncryptAndSend(text string, recipient string, chain int) 
 // and transmits them to each cascade. If no
 // user message is available in a round, cover
 // traffic is encrypted and sent in its place.
-func (cl *Client) SendMsg() error {
+func (cl *Client) SendMsg() {
 
-	tests := []string{
-		"Good morning, New York!",
-		"@$°%___!!!#### <- symbols much?",
-		"lorem ipsum dolor sit cannot be missing of course",
-		"TweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweet",
-		"All human beings are born free and equal in dignity and rights. They are endowed with reason and conscience and should act towards one another in a spirit of brotherhood. Everyone is entitled to all the rights and freedoms set forth in this Declaration, without distinction of any kind, such as race, colour, sex, language, religion, political or other opinion, national or social origin, property, birth or other status. Furthermore, no distinction shall be made on the basis of the political, jurisdictional or international status of the country or territory to which a person belongs, whether it be independent, trust, non-self-governing or under any other limitation of sovereignty.",
+	tests := []struct {
+		Msg       string
+		Recipient string
+	}{
+		{"Good morning, New York!", "127.0.0.1:11111"},
+		//{"@$°%___!!!#### <- symbols much?", "127.0.0.1:11111"},
+		{"lorem ipsum dolor sit cannot be missing of course", "127.0.0.1:11111"},
+		{"TweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweet", "127.0.0.1:11111"},
+		{"All human beings are born free and equal in dignity and rights. They are endowed with reason and conscience and should act towards one another in a spirit of brotherhood. Everyone is entitled to all the rights and freedoms set forth in this Declaration, without distinction of any kind, such as race, colour, sex, language, religion, political or other opinion, national or social origin, property, birth or other status. Furthermore, no distinction shall be made on the basis of the political, jurisdictional or international status of the country or territory to which a person belongs, whether it be independent, trust, non-self-governing or under any other limitation of sovereignty.", "127.0.0.1:11111"},
 	}
 
-	for msg := range tests {
+	for t := range tests {
 
 		// Prepare the needed new round state,
 		// primarily including fresh key material.
 		err := cl.InitNewRound()
 		if err != nil {
-			return err
+			fmt.Printf("Initiating new round failed: %v\n", err)
+			os.Exit(1)
 		}
 
 		cl.SendWG.Add(len(cl.ChainMatrix))
@@ -209,12 +221,10 @@ func (cl *Client) SendMsg() error {
 		// In parallel, reverse onion-encrypt the
 		// message and send to all entry mixes.
 		for chain := range cl.ChainMatrix {
-			go cl.OnionEncryptAndSend(tests[msg], "127.0.0.1:11111", chain)
+			go cl.OnionEncryptAndSend(tests[t].Msg, tests[t].Recipient, chain)
 		}
 
 		// Wait for all entry messages to be sent.
 		cl.SendWG.Wait()
 	}
-
-	return nil
 }

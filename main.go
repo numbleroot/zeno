@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/gob"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -242,12 +243,28 @@ func main() {
 		}
 
 		// Handle messaging loop.
-		err = client.SendMsg()
-		if err != nil {
-			fmt.Printf("Error while running client: %v\n", err)
-			os.Exit(1)
+		go client.SendMsg()
+
+		for {
+
+			// Wait for incoming connections on public socket.
+			connWrite, err := client.PubListener.Accept()
+			if err != nil {
+				fmt.Printf("Public connection error: %v\n", err)
+				continue
+			}
+			decoder := gob.NewDecoder(connWrite)
+
+			// Wait for a message.
+			var msg []byte
+			err = decoder.Decode(&msg)
+			if err != nil {
+				fmt.Printf("Failed decoding incoming message as slice of bytes: %v\n", err)
+				continue
+			}
+
+			// Display message.
+			fmt.Printf("\nRECEIVED: '%s'\n\n", msg)
 		}
 	}
-
-	fmt.Printf("\nAll shut down, exiting.\n")
 }

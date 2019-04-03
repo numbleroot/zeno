@@ -33,8 +33,8 @@ type OnionKeyState struct {
 // layer, the message itself, and within the
 // message also the nonce used to encrypt.
 type ConvoMsg struct {
-	PublicKey *[32]byte
-	Content   []byte
+	PubKey  *[32]byte
+	Content []byte
 }
 
 // Node collects the basic information

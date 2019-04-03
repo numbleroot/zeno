@@ -11,6 +11,7 @@ import (
 	"math/big"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -103,12 +104,15 @@ func (mix *Mix) AddCoverMsgsToPool(initFirst bool, numClients int, numSamples in
 		}
 		chosen := int(chosenBig.Int64())
 
+		// TODO: Move back to random fill-up!
 		// Prepare mostly random cover message.
 		msgPadded := new([280]byte)
-		_, err = io.ReadFull(rand.Reader, msgPadded[:])
-		if err != nil {
-			return err
-		}
+		/*
+			_, err = io.ReadFull(rand.Reader, msgPadded[:])
+			if err != nil {
+				return err
+			}
+		*/
 		copy(msgPadded[:], "COVER MESSAGE, PLEASE DISCARD")
 
 		// Create empty Cap'n Proto messsage.
@@ -317,6 +321,8 @@ func (mix *Mix) SendOutMsg(msgChan chan *rpc.ConvoMsg) {
 			continue
 		}
 
+		fmt.Printf("Will send to '%s'\n", string(addr))
+
 		// Extract message to send.
 		msg, err := exitMsg.Content()
 		if err != nil {
@@ -327,12 +333,18 @@ func (mix *Mix) SendOutMsg(msgChan chan *rpc.ConvoMsg) {
 		// Connect to client node.
 		conn, err := net.Dial("tcp", string(addr))
 		if err != nil {
-			fmt.Printf("Failed sending message to final client '%s': %v\n", addr, err)
+			fmt.Printf("Failed connecting to client '%s': %v\n", addr, err)
+			continue
+		}
+		encoder := gob.NewEncoder(conn)
+
+		// Send message content and close connection.
+		err = encoder.Encode(msg)
+		if err != nil {
+			fmt.Printf("Failed sending message to client '%s': %v\n", addr, err)
 			continue
 		}
 
-		// Send message content and close connection.
-		fmt.Fprintf(conn, "%v\n", msg)
 		conn.Close()
 	}
 }
@@ -479,6 +491,8 @@ func (mix *Mix) RotateRoundState() {
 				go mix.SendOutMsg(msgChan)
 			}
 
+			fmt.Printf("len(mix.OutPool): %d\n", len(mix.OutPool))
+
 			// Hand over outgoing messages to goroutines
 			// performing the actual sending.
 			for i := range mix.OutPool {
@@ -537,7 +551,7 @@ func (mix *Mix) AddConvoMsg(connRead *bufio.Reader, connWrite net.Conn) {
 	defer connWrite.Close()
 
 	// Extract sender address from request.
-	sender := connWrite.RemoteAddr().String()
+	sender := strings.Split(connWrite.RemoteAddr().String(), ":")[0]
 
 	// Wrap TCP connection from client in
 	// efficient decoder for ConvoMsg structs.
@@ -552,15 +566,13 @@ func (mix *Mix) AddConvoMsg(connRead *bufio.Reader, connWrite net.Conn) {
 		return
 	}
 
-	fmt.Printf("Received the following conversation message from %s:\n\tPubKey: '%x'\n\tContent: '%#v'\n\n", sender, *encConvoMsg.PublicKey, encConvoMsg.Content)
-
 	// Extract nonce used during encryption
 	// of onionized message from convo message.
 	nonce := new([24]byte)
 	copy(nonce[:], encConvoMsg.Content[:24])
 
 	// Decrypt message content.
-	convoMsgRaw, ok := box.Open(nil, encConvoMsg.Content[24:], nonce, encConvoMsg.PublicKey, mix.RecvSecKey)
+	convoMsgRaw, ok := box.Open(nil, encConvoMsg.Content[24:], nonce, encConvoMsg.PubKey, mix.RecvSecKey)
 	if !ok {
 		fmt.Printf("Failed to decrypt received conversation message by client %s\n", sender)
 		fmt.Fprintf(connWrite, "1\n")
@@ -588,11 +600,14 @@ func (mix *Mix) AddConvoMsg(connRead *bufio.Reader, connWrite net.Conn) {
 
 	mix.muAddMsgs.Lock()
 
+	// Check participation map for an entry for
+	// this sender address.
 	alreadySentInRound, _ := mix.ClientsSeen[sender]
 	if alreadySentInRound {
 
 		mix.muAddMsgs.Unlock()
 
+		// Respond to client with 'wait' code.
 		fmt.Fprintf(connWrite, "2\n")
 		return
 	}
@@ -697,6 +712,8 @@ func (mix *Mix) AddBatch(call rpc.Mix_addBatch) error {
 
 			return nil
 		}
+
+		fmt.Printf("Will append: '%s'\n", convoMsg.String())
 
 		// Lock first message pool, append
 		// message, and unlock.
