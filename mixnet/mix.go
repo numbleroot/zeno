@@ -1,6 +1,7 @@
 package mixnet
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/rand"
@@ -128,7 +129,13 @@ func (mix *Mix) AddCoverMsgsToPool(initFirst bool, numClients int, numSamples in
 			// This is an exit mix, thus simply add the
 			// cover message directly to respective pool.
 			if initFirst {
+
+				// If we are manipulating the first pool which
+				// is shared, we have to acquire the lock first.
+				mix.muAddMsgs.Lock()
 				mix.FirstPool = append(mix.FirstPool, &convoExitMsg)
+				mix.muAddMsgs.Unlock()
+
 			} else {
 				mix.NextPool = append(mix.NextPool, &convoExitMsg)
 			}
@@ -233,7 +240,13 @@ func (mix *Mix) AddCoverMsgsToPool(initFirst bool, numClients int, numSamples in
 
 			// Add layered ConvoMixMsg to respective pool.
 			if initFirst {
+
+				// If we are manipulating the first pool which
+				// is shared, we have to acquire the lock first.
+				mix.muAddMsgs.Lock()
 				mix.FirstPool = append(mix.FirstPool, &convoMixMsg)
+				mix.muAddMsgs.Unlock()
+
 			} else {
 				mix.NextPool = append(mix.NextPool, &convoMixMsg)
 			}
@@ -261,12 +274,15 @@ func (mix *Mix) InitNewRound() error {
 	mix.ClientsSeen = make(map[string]bool)
 
 	// Prepare pools for conversation messages.
-	mix.muFirstPool = &sync.Mutex{}
 	mix.FirstPool = make([]*rpc.ConvoMsg, 0, maxNumMsg)
 	mix.SecPool = make([]*rpc.ConvoMsg, 0, maxNumMsg)
 	mix.ThirdPool = make([]*rpc.ConvoMsg, 0, maxNumMsg)
 	mix.NextPool = make([]*rpc.ConvoMsg, 0, maxNumMsg)
 	mix.OutPool = make([]*rpc.ConvoMsg, 0, maxNumMsg)
+
+	// Prepare mutex restricting manipulation
+	// access to all shared round state elements.
+	mix.muAddMsgs = &sync.Mutex{}
 
 	// Add basis of cover traffic to first pool.
 	err := mix.AddCoverMsgsToPool(true, numClients, numSamples)
@@ -327,206 +343,198 @@ func (mix *Mix) SendOutMsg(msgChan chan *rpc.ConvoMsg) {
 // batch of messages chosen in this round,
 // and preparing the subsequent replacement
 // message pool with cover messages.
-func (mix *Mix) RotateRoundState() error {
-
-	mix.printPools()
-
-	numClients := len(mix.KnownClients)
-	numSamples := numClients / 100
-	if numSamples < 100 {
-		numSamples = numClients
-	}
-	maxNumMsg := numClients + numSamples + 10
-
-	// Use channel later to communicate end
-	// of cover traffic generation in background.
-	coverGenErrChan := make(chan error)
-
-	// Acquire lock on first pool.
-	mix.muFirstPool.Lock()
-
-	// Rotate first to second, second to third,
-	// and third to outgoing message pool.
-	mix.OutPool = mix.ThirdPool
-	mix.ThirdPool = mix.SecPool
-	mix.SecPool = mix.FirstPool
-
-	// Rotate prepared background message pool
-	// prepopulated with cover messages to
-	// first slot.
-	mix.FirstPool = mix.NextPool
-
-	// Unlock first pool so that the regular
-	// message handlers can continue to insert
-	// mix messages.
-	mix.muFirstPool.Unlock()
-
-	go func(numClients int, numSamples int) {
-
-		// Create new empty slice for upcoming round.
-		mix.NextPool = make([]*rpc.ConvoMsg, 0, maxNumMsg)
-
-		// Add basis of cover traffic to background
-		// pool that will become the first pool next
-		// round rotation.
-		err := mix.AddCoverMsgsToPool(false, numClients, numSamples)
-		if err != nil {
-			coverGenErrChan <- err
-		}
-
-		coverGenErrChan <- nil
-
-	}(numClients, numSamples)
-
-	// Truly randomly permute messages in SecPool.
-	for i := (len(mix.SecPool) - 1); i > 0; i-- {
-
-		// Generate new CSPRNG number smaller than i.
-		jBig, err := rand.Int(rand.Reader, big.NewInt(int64(i)))
-		if err != nil {
-			return err
-		}
-		j := int(jBig.Int64())
-
-		// Swap places i and j in second pool.
-		mix.SecPool[i], mix.SecPool[j] = mix.SecPool[j], mix.SecPool[i]
-	}
-
-	// Choose variance value randomly.
-	varianceBig, err := rand.Int(rand.Reader, big.NewInt(BatchSizeVariance))
-	if err != nil {
-		return err
-	}
-	variance := int(varianceBig.Int64())
-
-	// Calculate appropriate pool indices. Start is set to half
-	// of the SecPool's length minus the randomly chosen variance
-	// value to introduce some randomness. End is set to include
-	// all elements from start until the end of the pool.
-	end := len(mix.SecPool)
-	start := (end / 2) - variance
-	if start < 0 {
-		start = 0
-	}
-
-	// Append last (end - start) messages from SecPool to OutPool.
-	mix.OutPool = append(mix.OutPool, mix.SecPool[start:end]...)
-
-	// Shrink size of SecPool by (end - start).
-	mix.SecPool = mix.SecPool[:start]
-
-	end = len(mix.ThirdPool)
-	start = (end / 2) - variance
-	if start < 0 {
-		start = 0
-	}
-
-	// Append last (end - start) messages from ThirdPool to OutPool.
-	mix.OutPool = append(mix.OutPool, mix.ThirdPool[start:end]...)
-
-	// Shrink size of ThirdPool by (end - start).
-	mix.ThirdPool = mix.ThirdPool[:start]
-
-	// Randomly permute OutPool once more to destroy any potential
-	// for linking the order in the outgoing message batch to a
-	// message's relationship to one of the pools.
-	for i := (len(mix.OutPool) - 1); i > 0; i-- {
-
-		// Generate new CSPRNG number smaller than i.
-		jBig, err := rand.Int(rand.Reader, big.NewInt(int64(i)))
-		if err != nil {
-			return err
-		}
-		j := int(jBig.Int64())
-
-		// Swap places i and j in outgoing message pool.
-		mix.OutPool[i], mix.OutPool[j] = mix.OutPool[j], mix.OutPool[i]
-	}
-
-	if mix.IsExit {
-
-		// Prepare parallel sending of outgoing
-		// messages to clients.
-		msgChan := make(chan *rpc.ConvoMsg, 10000)
-		for i := 0; i < 10000; i++ {
-			go mix.SendOutMsg(msgChan)
-		}
-
-		// Hand over outgoing messages to goroutines
-		// performing the actual sending.
-		for i := range mix.OutPool {
-			msgChan <- mix.OutPool[i]
-		}
-		close(msgChan)
-
-	} else {
-
-		// Send batch of conversation messages
-		// to subsequent mix in cascade.
-		status, err := mix.Successor.AddBatch(context.Background(), func(p rpc.Mix_addBatch_Params) error {
-
-			// Create new batch and set its messages.
-			batch, err := p.NewBatch()
-			if err != nil {
-				return err
-			}
-
-			msgs, err := batch.NewMsgs(int32(len(mix.OutPool)))
-			if err != nil {
-				return err
-			}
-
-			for i := range mix.OutPool {
-				msgs.Set(i, *mix.OutPool[i])
-			}
-
-			return nil
-
-		}).Struct()
-		if err != nil {
-			return err
-		}
-
-		if status.Status() != 0 {
-			return fmt.Errorf("successor mix returned non-zero response: %d", status.Status())
-		}
-	}
-
-	// Wait for cover traffic generation to finish.
-	err = <-coverGenErrChan
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// HandleRound runs the round-synchronized
-// mix node protocol. That includes the round
-// state rotation at each tick and sending
-// forward either message batches or final
-// client messages.
-func (mix *Mix) HandleRound() {
+func (mix *Mix) RotateRoundState() {
 
 	for {
 
 		<-mix.RoundTicker.C
 
-		err := mix.RotateRoundState()
+		mix.printPools()
+
+		numClients := len(mix.KnownClients)
+		numSamples := numClients / 100
+		if numSamples < 100 {
+			numSamples = numClients
+		}
+		maxNumMsg := numClients + numSamples + 10
+
+		// Use channel later to communicate end
+		// of cover traffic generation in background.
+		coverGenErrChan := make(chan error)
+
+		// Acquire lock on first pool.
+		mix.muAddMsgs.Lock()
+
+		// Reset participation tracking map.
+		mix.ClientsSeen = make(map[string]bool)
+
+		// Rotate first to second, second to third,
+		// and third to outgoing message pool.
+		mix.OutPool = mix.ThirdPool
+		mix.ThirdPool = mix.SecPool
+		mix.SecPool = mix.FirstPool
+
+		// Rotate prepared background message pool
+		// prepopulated with cover messages to
+		// first slot.
+		mix.FirstPool = mix.NextPool
+
+		// Unlock first pool so that the regular
+		// message handlers can continue to insert
+		// mix messages.
+		mix.muAddMsgs.Unlock()
+
+		go func(numClients int, numSamples int) {
+
+			// Create new empty slice for upcoming round.
+			mix.NextPool = make([]*rpc.ConvoMsg, 0, maxNumMsg)
+
+			// Add basis of cover traffic to background
+			// pool that will become the first pool next
+			// round rotation.
+			err := mix.AddCoverMsgsToPool(false, numClients, numSamples)
+			if err != nil {
+				coverGenErrChan <- err
+			}
+
+			coverGenErrChan <- nil
+
+		}(numClients, numSamples)
+
+		// Truly randomly permute messages in SecPool.
+		for i := (len(mix.SecPool) - 1); i > 0; i-- {
+
+			// Generate new CSPRNG number smaller than i.
+			jBig, err := rand.Int(rand.Reader, big.NewInt(int64(i)))
+			if err != nil {
+				fmt.Printf("Rotating round state failed: %v\n", err)
+				os.Exit(1)
+			}
+			j := int(jBig.Int64())
+
+			// Swap places i and j in second pool.
+			mix.SecPool[i], mix.SecPool[j] = mix.SecPool[j], mix.SecPool[i]
+		}
+
+		// Choose variance value randomly.
+		varianceBig, err := rand.Int(rand.Reader, big.NewInt(BatchSizeVariance))
 		if err != nil {
-			fmt.Printf("Round rotation failed: %v\n", err)
+			fmt.Printf("Rotating round state failed: %v\n", err)
+			os.Exit(1)
+		}
+		variance := int(varianceBig.Int64())
+
+		// Calculate appropriate pool indices. Start is set to half
+		// of the SecPool's length minus the randomly chosen variance
+		// value to introduce some randomness. End is set to include
+		// all elements from start until the end of the pool.
+		end := len(mix.SecPool)
+		start := (end / 2) - variance
+		if start < 0 {
+			start = 0
+		}
+
+		// Append last (end - start) messages from SecPool to OutPool.
+		mix.OutPool = append(mix.OutPool, mix.SecPool[start:end]...)
+
+		// Shrink size of SecPool by (end - start).
+		mix.SecPool = mix.SecPool[:start]
+
+		end = len(mix.ThirdPool)
+		start = (end / 2) - variance
+		if start < 0 {
+			start = 0
+		}
+
+		// Append last (end - start) messages from ThirdPool to OutPool.
+		mix.OutPool = append(mix.OutPool, mix.ThirdPool[start:end]...)
+
+		// Shrink size of ThirdPool by (end - start).
+		mix.ThirdPool = mix.ThirdPool[:start]
+
+		// Randomly permute OutPool once more to destroy any potential
+		// for linking the order in the outgoing message batch to a
+		// message's relationship to one of the pools.
+		for i := (len(mix.OutPool) - 1); i > 0; i-- {
+
+			// Generate new CSPRNG number smaller than i.
+			jBig, err := rand.Int(rand.Reader, big.NewInt(int64(i)))
+			if err != nil {
+				fmt.Printf("Rotating round state failed: %v\n", err)
+				os.Exit(1)
+			}
+			j := int(jBig.Int64())
+
+			// Swap places i and j in outgoing message pool.
+			mix.OutPool[i], mix.OutPool[j] = mix.OutPool[j], mix.OutPool[i]
+		}
+
+		if mix.IsExit {
+
+			// Prepare parallel sending of outgoing
+			// messages to clients.
+			msgChan := make(chan *rpc.ConvoMsg, 10000)
+			for i := 0; i < 10000; i++ {
+				go mix.SendOutMsg(msgChan)
+			}
+
+			// Hand over outgoing messages to goroutines
+			// performing the actual sending.
+			for i := range mix.OutPool {
+				msgChan <- mix.OutPool[i]
+			}
+			close(msgChan)
+
+		} else {
+
+			// Send batch of conversation messages
+			// to subsequent mix in cascade.
+			status, err := mix.Successor.AddBatch(context.Background(), func(p rpc.Mix_addBatch_Params) error {
+
+				// Create new batch and set its messages.
+				batch, err := p.NewBatch()
+				if err != nil {
+					return err
+				}
+
+				msgs, err := batch.NewMsgs(int32(len(mix.OutPool)))
+				if err != nil {
+					return err
+				}
+
+				for i := range mix.OutPool {
+					msgs.Set(i, *mix.OutPool[i])
+				}
+
+				return nil
+
+			}).Struct()
+			if err != nil {
+				fmt.Printf("Rotating round state failed: %v\n", err)
+				os.Exit(1)
+			}
+
+			if status.Status() != 0 {
+				fmt.Printf("Rotating round state failed: successor mix returned non-zero response: %d", status.Status())
+				os.Exit(1)
+			}
+		}
+
+		// Wait for cover traffic generation to finish.
+		err = <-coverGenErrChan
+		if err != nil {
+			fmt.Printf("Rotating round state failed: %v\n", err)
+			os.Exit(1)
 		}
 	}
 }
 
 // AddConvoMsg enables a client to deliver
 // a conversation message to an entry mix.
-func (mix *Mix) AddConvoMsg(call rpc.Mix_addConvoMsg) error {
+func (mix *Mix) AddConvoMsg(connRead *bufio.Reader, connWrite net.Conn) {
 
-	// TODO: Implement rate limiting by sender address
-	//       to one message per round per cascade.
-	//       Might require us to ditch Cap'n Proto
-	//       for delivering client to entry messages.
+	// Extract sender address from request.
+	sender := connWrite.RemoteAddr().String()
 
 	// Extract convo message to append to
 	// mix node's message pools from request.
@@ -600,14 +608,24 @@ func (mix *Mix) AddConvoMsg(call rpc.Mix_addConvoMsg) error {
 		return nil
 	}
 
-	// Lock first message pool, append
-	// message, and unlock.
-	mix.muFirstPool.Lock()
+	mix.muAddMsgs.Lock()
+
+	alreadySentInRound, _ = mix.ClientsSeen[sender]
+	if alreadySentInRound {
+
+		mix.muAddMsgs.Unlock()
+
+		fmt.Fprintf(connWrite, "wait\n")
+		return
+	}
+
+	mix.ClientsSeen[sender] = true
 	mix.FirstPool = append(mix.FirstPool, &convoMsg)
-	mix.muFirstPool.Unlock()
+
+	mix.muAddMsgs.Unlock()
 
 	// Acknowledge client.
-	call.Results.SetStatus(0)
+	fmt.Fprintf(connWrite, "0\n")
 
 	return nil
 }
@@ -706,9 +724,9 @@ func (mix *Mix) AddBatch(call rpc.Mix_addBatch) error {
 
 		// Lock first message pool, append
 		// message, and unlock.
-		mix.muFirstPool.Lock()
+		mix.muAddMsgs.Lock()
 		mix.FirstPool = append(mix.FirstPool, &convoMsg)
-		mix.muFirstPool.Unlock()
+		mix.muAddMsgs.Unlock()
 	}
 
 	// Acknowledge predecessor mix.
@@ -717,10 +735,10 @@ func (mix *Mix) AddBatch(call rpc.Mix_addBatch) error {
 	return nil
 }
 
-// HandleMsg accepts incoming Cap'n Proto
+// HandleBatchMsgs accepts incoming Cap'n Proto
 // messages, constructs appropriate wrappers,
 // and handles the request.
-func (mix *Mix) HandleMsg(c net.Conn) {
+func (mix *Mix) HandleBatchMsgs(c net.Conn) {
 
 	main := rpc.Mix_ServerToClient(mix)
 	conn := capnprpc.NewConn(capnprpc.StreamTransport(c), capnprpc.MainInterface(main.Client))

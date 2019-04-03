@@ -13,6 +13,5 @@ struct Batch {
 }
 
 interface Mix {
-    addConvoMsg @0 (msg :ConvoMsg) -> (status :UInt8);
     addBatch @1 (batch :Batch) -> (status :UInt8);
 }

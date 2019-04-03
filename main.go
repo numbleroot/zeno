@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
@@ -202,18 +203,33 @@ func main() {
 
 		// Run mix node part of mix-net round
 		// protocol in background.
-		go mix.HandleRound()
+		go mix.RotateRoundState()
 
 		for {
 
 			// Wait for incoming connections on public socket.
-			conn, err := mix.PubListener.Accept()
+			connWrite, err := mix.PubListener.Accept()
 			if err != nil {
 				fmt.Printf("Public connection error: %v\n", err)
 				continue
 			}
 
-			go mix.HandleMsg(conn)
+			if mix.IsEntry {
+
+				// Create buffered I/O reader from connection.
+				connRead := bufio.NewReader(connWrite)
+
+				// At entry mixes we only receive single
+				// conversation messages from clients.
+				// We handle them directly.
+				go mix.AddConvoMsg(connRead, connWrite)
+
+			} else {
+
+				// At non-entry mixes we only expect to receive
+				// Cap'n Proto batch messages.
+				go mix.HandleBatchMsgs(connWrite)
+			}
 		}
 
 	} else {
