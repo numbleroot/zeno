@@ -182,12 +182,31 @@ func (node *Node) ConfigureChainMatrix(connRead *bufio.Reader, connWrite net.Con
 	// TODO: Run VDF over candidates. Output is a
 	//       sequence of mixes of size c = s x l.
 
-	// TODO: Walk through sequence and fill ChainMatrix
-	//       accordingly. If we see our address and
-	//       public key, set flag whether we are an
-	//       entry mix or a common one.
-	node.ChainMatrix = [][]*Endpoint{
-		cands,
+	if len(cands) != (NumCascades * LenCascade) {
+		return fmt.Errorf("received candidates set of unexpected length, saw: %d, expected: %d", len(cands), (NumCascades * LenCascade))
+	}
+
+	node.ChainMatrix = make([][]*Endpoint, NumCascades)
+
+	for c := 0; c < NumCascades; c++ {
+
+		chain := make([]*Endpoint, LenCascade)
+
+		// Extract next-up candidate from list.
+		for m := 0; m < LenCascade; m++ {
+			chain[m] = cands[((c * LenCascade) + m)]
+		}
+
+		// Integrate new chain into matrix.
+		node.ChainMatrix[c] = chain
+	}
+
+	fmt.Printf("New chain matrix:\n")
+	for i := range node.ChainMatrix {
+
+		for j := range node.ChainMatrix[i] {
+			fmt.Printf("\t%d, %d: %s\n", i, j, node.ChainMatrix[i][j].Addr)
+		}
 	}
 
 	// Signal channel node.ChainMatrixConfigured.

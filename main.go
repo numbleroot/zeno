@@ -264,7 +264,7 @@ func main() {
 			}
 
 			// Display message.
-			fmt.Printf("\nRECEIVED: '%s'\n", msg)
+			fmt.Printf("RECEIVED: '%s'\n", msg)
 		}
 	}
 }

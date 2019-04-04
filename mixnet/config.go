@@ -23,3 +23,12 @@ const MixMsgOverhead = 104
 // to half of the number of messages in
 // a pool to append to the outgoing pool.
 const BatchSizeVariance = 5
+
+// NumCascades defines the number of
+// distinct cascades that make up the
+// chain matrix.
+const NumCascades = 2
+
+// LenCascade defines the number of mixes
+// required to form one mix cascade.
+const LenCascade = 3
