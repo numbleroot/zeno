@@ -104,16 +104,11 @@ func (mix *Mix) AddCoverMsgsToPool(initFirst bool, numClients int, numSamples in
 		}
 		chosen := int(chosenBig.Int64())
 
-		// TODO: Move back to random fill-up!
-		// Prepare mostly random cover message.
+		// Prepare cover message.
+		// TODO: Think hard about fill-up with random bytes again.
+		//       Any attacker advantage if we only use zeros to fill up?
 		msgPadded := new([280]byte)
-		/*
-			_, err = io.ReadFull(rand.Reader, msgPadded[:])
-			if err != nil {
-				return err
-			}
-		*/
-		copy(msgPadded[:], "COVER MESSAGE, PLEASE DISCARD")
+		copy(msgPadded[:], "COVER MESSAGE PLEASE DISCARD")
 
 		// Create empty Cap'n Proto messsage.
 		protoMsg, protoMsgSeg, err := capnp.NewMessage(capnp.SingleSegment(nil))
@@ -491,8 +486,6 @@ func (mix *Mix) RotateRoundState() {
 				go mix.SendOutMsg(msgChan)
 			}
 
-			fmt.Printf("len(mix.OutPool): %d\n", len(mix.OutPool))
-
 			// Hand over outgoing messages to goroutines
 			// performing the actual sending.
 			for i := range mix.OutPool {
@@ -561,8 +554,10 @@ func (mix *Mix) AddConvoMsg(connRead *bufio.Reader, connWrite net.Conn) {
 	encConvoMsg := &ConvoMsg{}
 	err := decoder.Decode(encConvoMsg)
 	if err != nil {
+
 		fmt.Printf("Error decoding struct received from client: %v\n", err)
 		fmt.Fprintf(connWrite, "%v\n", err)
+
 		return
 	}
 
@@ -583,8 +578,10 @@ func (mix *Mix) AddConvoMsg(connRead *bufio.Reader, connWrite net.Conn) {
 	// byte slice to Cap'n Proto message.
 	convoMsgProto, err := capnp.Unmarshal(convoMsgRaw)
 	if err != nil {
+
 		fmt.Printf("Error unmarshaling received contained message by client %s: %v\n", sender, err)
 		fmt.Fprintf(connWrite, "1\n")
+
 		return
 	}
 
@@ -595,6 +592,7 @@ func (mix *Mix) AddConvoMsg(connRead *bufio.Reader, connWrite net.Conn) {
 
 		fmt.Printf("Error reading conversation message from contained message by client %s: %v\n", sender, err)
 		fmt.Fprintf(connWrite, "1\n")
+
 		return
 	}
 
@@ -609,6 +607,7 @@ func (mix *Mix) AddConvoMsg(connRead *bufio.Reader, connWrite net.Conn) {
 
 		// Respond to client with 'wait' code.
 		fmt.Fprintf(connWrite, "2\n")
+
 		return
 	}
 
@@ -712,8 +711,6 @@ func (mix *Mix) AddBatch(call rpc.Mix_addBatch) error {
 
 			return nil
 		}
-
-		fmt.Printf("Will append: '%s'\n", convoMsg.String())
 
 		// Lock first message pool, append
 		// message, and unlock.

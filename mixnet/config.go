@@ -22,4 +22,4 @@ const MixMsgOverhead = 104
 // amount of messages added additionally
 // to half of the number of messages in
 // a pool to append to the outgoing pool.
-const BatchSizeVariance = 1
+const BatchSizeVariance = 5
