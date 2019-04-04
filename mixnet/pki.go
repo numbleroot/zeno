@@ -201,14 +201,6 @@ func (node *Node) ConfigureChainMatrix(connRead *bufio.Reader, connWrite net.Con
 		node.ChainMatrix[c] = chain
 	}
 
-	fmt.Printf("New chain matrix:\n")
-	for i := range node.ChainMatrix {
-
-		for j := range node.ChainMatrix[i] {
-			fmt.Printf("\t%d, %d: %s\n", i, j, node.ChainMatrix[i][j].Addr)
-		}
-	}
-
 	// Signal channel node.ChainMatrixConfigured.
 	node.ChainMatrixConfigured <- struct{}{}
 
