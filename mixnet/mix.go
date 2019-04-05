@@ -5,16 +5,17 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/gob"
 	"fmt"
 	"io"
 	"math/big"
 	"net"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
+	"github.com/lucas-clemente/quic-go"
 	"github.com/numbleroot/zeno/rpc"
 	"golang.org/x/crypto/nacl/box"
 	capnp "zombiezen.com/go/capnproto2"
@@ -62,20 +63,43 @@ func (mix *Mix) ReconnectToSuccessor() error {
 
 	if !mix.IsExit {
 
-		// Connect to successor mix over TCP.
-		conn, err := net.Dial("tcp", string(mix.ChainMatrix[mix.OwnChain][(mix.OwnIndex+1)].Addr))
+		session, err := quic.DialAddr(string(mix.ChainMatrix[mix.OwnChain][(mix.OwnIndex+1)].Addr), &tls.Config{
+			InsecureSkipVerify: true,
+		}, nil)
+		if err != nil {
+			return err
+		}
+
+		stream, err := session.OpenStreamSync()
 		if err != nil {
 			return err
 		}
 
 		// Wrap TCP connection in Cap'n Proto RPC.
-		connRCP := capnprpc.NewConn(capnprpc.StreamTransport(conn))
+		connRCP := capnprpc.NewConn(capnprpc.StreamTransport(stream))
 
 		// Bundle RPC connection in struct on
 		// which to call methods later on.
 		mix.Successor = &rpc.Mix{
 			Client: connRCP.Bootstrap(context.Background()),
 		}
+
+		/*
+			// Connect to successor mix over TCP.
+			conn, err := net.Dial("tcp", string(mix.ChainMatrix[mix.OwnChain][(mix.OwnIndex+1)].Addr))
+			if err != nil {
+				return err
+			}
+
+			// Wrap TCP connection in Cap'n Proto RPC.
+			connRCP := capnprpc.NewConn(capnprpc.StreamTransport(conn))
+
+			// Bundle RPC connection in struct on
+			// which to call methods later on.
+			mix.Successor = &rpc.Mix{
+				Client: connRCP.Bootstrap(context.Background()),
+			}
+		*/
 	}
 
 	return nil
@@ -326,6 +350,7 @@ func (mix *Mix) SendOutMsg(msgChan chan *rpc.ConvoMsg) {
 		}
 
 		// Connect to client node.
+		// TODO: Should this be over TLS not TCP?
 		conn, err := net.Dial("tcp", string(addr))
 		if err != nil {
 			fmt.Printf("Failed connecting to client '%s': %v\n", addr, err)
@@ -539,12 +564,9 @@ func (mix *Mix) RotateRoundState() {
 
 // AddConvoMsg enables a client to deliver
 // a conversation message to an entry mix.
-func (mix *Mix) AddConvoMsg(connRead *bufio.Reader, connWrite net.Conn) {
+func (mix *Mix) AddConvoMsg(connRead *bufio.Reader, connWrite quic.Stream, sender string) {
 
 	defer connWrite.Close()
-
-	// Extract sender address from request.
-	sender := strings.Split(connWrite.RemoteAddr().String(), ":")[0]
 
 	// Wrap TCP connection from client in
 	// efficient decoder for ConvoMsg structs.
@@ -728,7 +750,14 @@ func (mix *Mix) AddBatch(call rpc.Mix_addBatch) error {
 // HandleBatchMsgs accepts incoming Cap'n Proto
 // messages, constructs appropriate wrappers,
 // and handles the request.
-func (mix *Mix) HandleBatchMsgs(c net.Conn) {
+func (mix *Mix) HandleBatchMsgs(c quic.Stream, sender string) {
+
+	// Ensure only the predecessor mix is able to
+	// take up this mix node's compute ressources.
+	if sender != string(mix.ChainMatrix[mix.OwnChain][(mix.OwnIndex-1)].Addr) {
+		fmt.Printf("Node at '%s' tried to send a message batch but we expect predecessor '%s'.\n", sender, string(mix.ChainMatrix[mix.OwnChain][(mix.OwnIndex-1)].Addr))
+		return
+	}
 
 	main := rpc.Mix_ServerToClient(mix)
 	conn := capnprpc.NewConn(capnprpc.StreamTransport(c), capnprpc.MainInterface(main.Client))

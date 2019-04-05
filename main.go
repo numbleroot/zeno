@@ -12,7 +12,10 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+
+	"github.com/lucas-clemente/quic-go"
 
 	"github.com/numbleroot/zeno/mixnet"
 	"golang.org/x/crypto/nacl/box"
@@ -101,6 +104,7 @@ func main() {
 
 	// Open up socket for eventual chain matrix
 	// election data from PKI.
+	// TODO: Should this be over TLS not TCP?
 	node.PKIListener, err = net.Listen("tcp", node.PKILisAddr)
 	if err != nil {
 		fmt.Printf("Failed to listen for PKI information on socket %s: %v\n", node.PKILisAddr, err)
@@ -109,7 +113,11 @@ func main() {
 	defer node.PKIListener.Close()
 
 	// Start listening for incoming mix-net messages.
-	node.PubListener, err = net.Listen("tcp", node.PubLisAddr)
+	// TODO: Should this be over TLS not TCP?
+	// node.PubListener, err = net.Listen("tcp", node.PubLisAddr)
+	node.PubListener, err = quic.ListenAddr(node.PubLisAddr, &tls.Config{
+		InsecureSkipVerify: true,
+	}, nil)
 	if err != nil {
 		fmt.Printf("Failed to listen for mix-net messages on socket %s: %v\n", node.PubLisAddr, err)
 		os.Exit(1)
@@ -209,11 +217,20 @@ func main() {
 		for {
 
 			// Wait for incoming connections on public socket.
-			connWrite, err := mix.PubListener.Accept()
+			session, err := mix.PubListener.Accept()
 			if err != nil {
 				fmt.Printf("Public connection error: %v\n", err)
 				continue
 			}
+
+			connWrite, err := session.AcceptStream()
+			if err != nil {
+				fmt.Printf("Failed accepting incoming stream: %v\n", err)
+				continue
+			}
+
+			sender := strings.Split(session.RemoteAddr().String(), ":")[0]
+			fmt.Printf("Sender: '%s'\n", sender)
 
 			if mix.IsEntry {
 
@@ -223,13 +240,13 @@ func main() {
 				// At entry mixes we only receive single
 				// conversation messages from clients.
 				// We handle them directly.
-				go mix.AddConvoMsg(connRead, connWrite)
+				go mix.AddConvoMsg(connRead, connWrite, sender)
 
 			} else {
 
 				// At non-entry mixes we only expect to receive
 				// Cap'n Proto batch messages.
-				go mix.HandleBatchMsgs(connWrite)
+				go mix.HandleBatchMsgs(connWrite, sender)
 			}
 		}
 
@@ -248,9 +265,15 @@ func main() {
 		for {
 
 			// Wait for incoming connections on public socket.
-			connWrite, err := client.PubListener.Accept()
+			session, err := client.PubListener.Accept()
 			if err != nil {
 				fmt.Printf("Public connection error: %v\n", err)
+				continue
+			}
+
+			connWrite, err := session.AcceptStream()
+			if err != nil {
+				fmt.Printf("Failed accepting incoming stream: %v\n", err)
 				continue
 			}
 			decoder := gob.NewDecoder(connWrite)

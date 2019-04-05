@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lucas-clemente/quic-go"
 	"github.com/numbleroot/zeno/rpc"
 )
 
@@ -47,7 +48,7 @@ type Node struct {
 	PKITLSConf            *tls.Config
 	PKIListener           net.Listener
 	PubLisAddr            string
-	PubListener           net.Listener
+	PubListener           quic.Listener
 	ChainMatrixConfigured chan struct{}
 	ChainMatrix           [][]*Endpoint
 	KnownClients          []*Endpoint

@@ -142,6 +142,7 @@ func (cl *Client) OnionEncryptAndSend(text string, recipient string, chain int) 
 		encMsg := box.SealAfterPrecomputation(cl.CurRound[chain][0].Nonce[:], msg, cl.CurRound[chain][0].Nonce, cl.CurRound[chain][0].SymKey)
 
 		// Connect to this cascade's entry mix over TCP.
+		// TODO: Should this be over TLS not TCP?
 		connWrite, err := net.Dial("tcp", string(cl.ChainMatrix[chain][0].Addr))
 		if err != nil {
 			fmt.Printf("Failed connecting to entry mix of cascade %d: %v\n", chain, err)
