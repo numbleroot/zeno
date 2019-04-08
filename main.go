@@ -86,6 +86,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Generate ephemeral TLS certificate and config
+	// for public listener.
+	pubTLSConf, pubCertPEM, err := GenTLSCertAndConf("localhost", strings.Split(msgLisAddr, ":")[0])
+	if err != nil {
+		fmt.Printf("Failed generating ephemeral TLS certificate and config: %v\n", err)
+		os.Exit(1)
+	}
+
 	// Construct common node characteristics.
 	node := &mixnet.Node{
 		RecvPubKey: recvPubKey,
@@ -99,6 +107,8 @@ func main() {
 			CurvePreferences:   []tls.CurveID{tls.X25519},
 		},
 		PubLisAddr:            msgLisAddr,
+		PubTLSConf:            pubTLSConf,
+		PubCertPEM:            pubCertPEM,
 		ChainMatrixConfigured: make(chan struct{}),
 	}
 
@@ -115,9 +125,7 @@ func main() {
 	// Start listening for incoming mix-net messages.
 	// TODO: Should this be over TLS not TCP?
 	// node.PubListener, err = net.Listen("tcp", node.PubLisAddr)
-	node.PubListener, err = quic.ListenAddr(node.PubLisAddr, &tls.Config{
-		InsecureSkipVerify: true,
-	}, nil)
+	node.PubListener, err = quic.ListenAddr(node.PubLisAddr, node.PubTLSConf, nil)
 	if err != nil {
 		fmt.Printf("Failed to listen for mix-net messages on socket %s: %v\n", node.PubLisAddr, err)
 		os.Exit(1)
@@ -131,7 +139,7 @@ func main() {
 
 		// Nodes that offer to take up a mix role
 		// register their intent with the PKI.
-		err = node.RegisterMixIntent()
+		err = node.RegisterAtPKI("mixes")
 		if err != nil {
 			fmt.Printf("Failed to register intent for mixing at PKI server: %v\n", err)
 			os.Exit(1)
@@ -142,7 +150,7 @@ func main() {
 		// Nodes that are regular clients in the
 		// system register with their address and
 		// receive public key at the PKI.
-		err = node.RegisterClient()
+		err = node.RegisterAtPKI("clients")
 		if err != nil {
 			fmt.Printf("Failed to register as client at PKI server: %v\n", err)
 			os.Exit(1)
@@ -168,7 +176,7 @@ func main() {
 
 			// This node intended to become a mix yet did
 			// not get elected. Register as regular client.
-			err = node.RegisterClient()
+			err = node.RegisterAtPKI("clients")
 			if err != nil {
 				fmt.Printf("Failed to late-register as client at PKI server: %v\n", err)
 				os.Exit(1)

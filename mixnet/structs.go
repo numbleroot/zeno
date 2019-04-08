@@ -14,8 +14,9 @@ import (
 // entity on address associated with a
 // public key.
 type Endpoint struct {
-	Addr   []byte
-	PubKey *[32]byte
+	Addr       []byte
+	PubKey     *[32]byte
+	PubCertPEM []byte
 }
 
 // OnionKeyState collects the keys we need
@@ -48,6 +49,8 @@ type Node struct {
 	PKITLSConf            *tls.Config
 	PKIListener           net.Listener
 	PubLisAddr            string
+	PubTLSConf            *tls.Config
+	PubCertPEM            []byte
 	PubListener           quic.Listener
 	ChainMatrixConfigured chan struct{}
 	ChainMatrix           [][]*Endpoint

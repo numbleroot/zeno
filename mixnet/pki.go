@@ -16,10 +16,11 @@ func init() {
 	os.Setenv("GODEBUG", fmt.Sprintf("%s,tls13=1", os.Getenv("GODEBUG")))
 }
 
-// RegisterMixIntent contacts the PKI server
-// and registers this node's intent on participating
-// as mix node with it.
-func (node *Node) RegisterMixIntent() error {
+// RegisterAtPKI accepts a category to register a
+// node of this system under at the PKI, 'mixes'
+// or 'clients'. It transmit relevant node and
+// connection information via TLS to the PKI server.
+func (node *Node) RegisterAtPKI(category string) error {
 
 	// Connect to PKI TLS endpoint.
 	connWrite, err := tls.Dial("tcp", node.PKIAddr, node.PKITLSConf)
@@ -32,7 +33,7 @@ func (node *Node) RegisterMixIntent() error {
 
 	// Register this node's intent on participating
 	// as a mix node with the PKI.
-	fmt.Fprintf(connWrite, "post mixes %s %x %s\n", node.PubLisAddr, *node.RecvPubKey, node.PKILisAddr)
+	fmt.Fprintf(connWrite, "post %s %s %s %x %x\n", category, node.PubLisAddr, node.PKILisAddr, *node.RecvPubKey, node.PubCertPEM)
 
 	// Expect an acknowledgement.
 	resp, err := connRead.ReadString('\n')
@@ -46,42 +47,6 @@ func (node *Node) RegisterMixIntent() error {
 		return fmt.Errorf("PKI returned failure response to mix intent registration: %s", resp)
 	}
 
-	// Close connection.
-	fmt.Fprintf(connWrite, "quit\n")
-	connWrite.Close()
-
-	return nil
-}
-
-// RegisterClient announces this node's address
-// and receive public key as a client to the PKI.
-func (node *Node) RegisterClient() error {
-
-	// Connect to PKI TLS endpoint.
-	connWrite, err := tls.Dial("tcp", node.PKIAddr, node.PKITLSConf)
-	if err != nil {
-		return err
-	}
-
-	// Create buffered I/O reader from connection.
-	connRead := bufio.NewReader(connWrite)
-
-	// Register this node as a client in the system.
-	fmt.Fprintf(connWrite, "post clients %s %x %s\n", node.PubLisAddr, *node.RecvPubKey, node.PKILisAddr)
-
-	// Expect an acknowledgement.
-	resp, err := connRead.ReadString('\n')
-	if err != nil {
-		return err
-	}
-
-	// Verify cleaned response.
-	resp = strings.ToLower(strings.Trim(resp, "\n "))
-	if resp != "0" {
-		return fmt.Errorf("PKI returned failure response to client registration: %s", resp)
-	}
-
-	// Close connection.
 	connWrite.Close()
 
 	return nil
@@ -111,25 +76,36 @@ func (node *Node) GetAllClients() error {
 
 	// Parse string into slice of Endpoint.
 	clients := strings.Split(strings.ToLower(strings.Trim(clientsRaw, "\n ")), ";")
-	node.KnownClients = make([]*Endpoint, len(clients))
+	node.KnownClients = make([]*Endpoint, 0, len(clients))
 
 	for i := range clients {
 
 		client := strings.Split(clients[i], ",")
 
-		// Parse contained public key in hex
-		// representation to byte slice.
-		pubKey := new([32]byte)
-		pubKeyRaw, err := hex.DecodeString(client[1])
-		if err != nil {
-			return err
-		}
-		copy(pubKey[:], pubKeyRaw)
+		if node.PubLisAddr != client[0] {
 
-		// Append as new Endpoint.
-		node.KnownClients[i] = &Endpoint{
-			Addr:   []byte(client[0]),
-			PubKey: pubKey,
+			// Parse contained public key in hex
+			// representation to byte slice.
+			pubKey := new([32]byte)
+			pubKeyRaw, err := hex.DecodeString(client[1])
+			if err != nil {
+				return err
+			}
+			copy(pubKey[:], pubKeyRaw)
+
+			// Parse contained TLS certificate in
+			// hex representation to byte slice.
+			pubCertPEM, err := hex.DecodeString(client[2])
+			if err != nil {
+				return err
+			}
+
+			// Append as new Endpoint.
+			node.KnownClients = append(node.KnownClients, &Endpoint{
+				Addr:       []byte(client[0]),
+				PubKey:     pubKey,
+				PubCertPEM: pubCertPEM,
+			})
 		}
 	}
 
