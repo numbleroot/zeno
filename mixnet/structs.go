@@ -2,6 +2,7 @@ package mixnet
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"net"
 	"sync"
 	"time"
@@ -14,9 +15,9 @@ import (
 // entity on address associated with a
 // public key.
 type Endpoint struct {
-	Addr       []byte
-	PubKey     *[32]byte
-	PubCertPEM []byte
+	Addr        []byte
+	PubKey      *[32]byte
+	PubCertPool *x509.CertPool
 }
 
 // OnionKeyState collects the keys we need
@@ -54,7 +55,8 @@ type Node struct {
 	PubListener           quic.Listener
 	ChainMatrixConfigured chan struct{}
 	ChainMatrix           [][]*Endpoint
-	KnownClients          []*Endpoint
+	KnownClients          map[string]*Endpoint
+	ChooseClients         []string
 }
 
 // Client represents a client node in

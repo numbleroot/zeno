@@ -3,16 +3,17 @@ package mixnet
 import (
 	"bufio"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/gob"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"strings"
 	"time"
 
 	"golang.org/x/crypto/nacl/box"
 
+	"github.com/lucas-clemente/quic-go"
 	"github.com/numbleroot/zeno/rpc"
 	capnp "zombiezen.com/go/capnproto2"
 )
@@ -141,21 +142,34 @@ func (cl *Client) OnionEncryptAndSend(text string, recipient string, chain int) 
 		// symmetrically encrypt the current message.
 		encMsg := box.SealAfterPrecomputation(cl.CurRound[chain][0].Nonce[:], msg, cl.CurRound[chain][0].Nonce, cl.CurRound[chain][0].SymKey)
 
-		// Connect to this cascade's entry mix over TCP.
-		// TODO: Should this be over TLS not TCP?
-		connWrite, err := net.Dial("tcp", string(cl.ChainMatrix[chain][0].Addr))
+		// Connect to this cascade's entry mix
+		// via TLS-over-QUIC.
+		session, err := quic.DialAddr(string(cl.ChainMatrix[chain][0].Addr), &tls.Config{
+			RootCAs:            cl.ChainMatrix[chain][0].PubCertPool,
+			InsecureSkipVerify: false,
+			MinVersion:         tls.VersionTLS13,
+			CurvePreferences:   []tls.CurveID{tls.X25519},
+		}, nil)
 		if err != nil {
-			fmt.Printf("Failed connecting to entry mix of cascade %d: %v\n", chain, err)
+			fmt.Printf("Failed connecting to entry mix of cascade %d via QUIC: %v\n", chain, err)
 			os.Exit(1)
 		}
-		defer connWrite.Close()
+		defer session.Close()
+
+		// Upgrade session to blocking stream.
+		stream, err := session.OpenStreamSync()
+		if err != nil {
+			fmt.Printf("Failed to upgrade QUIC session to stream: %v\n", err)
+			os.Exit(1)
+		}
+		defer stream.Close()
 
 		// Create buffered I/O reader from connection.
-		connRead := bufio.NewReader(connWrite)
+		connRead := bufio.NewReader(stream)
 
 		// Wrap TCP connection in efficient encoder
 		// for transmitting structs.
-		encoder := gob.NewEncoder(connWrite)
+		encoder := gob.NewEncoder(stream)
 
 		// Encode and send conversation message to
 		// this cascade's entry mix.

@@ -16,7 +16,6 @@ import (
 	"sync"
 
 	"github.com/lucas-clemente/quic-go"
-
 	"github.com/numbleroot/zeno/mixnet"
 	"golang.org/x/crypto/nacl/box"
 )
@@ -123,8 +122,6 @@ func main() {
 	defer node.PKIListener.Close()
 
 	// Start listening for incoming mix-net messages.
-	// TODO: Should this be over TLS not TCP?
-	// node.PubListener, err = net.Listen("tcp", node.PubLisAddr)
 	node.PubListener, err = quic.ListenAddr(node.PubLisAddr, node.PubTLSConf, nil)
 	if err != nil {
 		fmt.Printf("Failed to listen for mix-net messages on socket %s: %v\n", node.PubLisAddr, err)

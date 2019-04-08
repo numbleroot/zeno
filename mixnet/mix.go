@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-	"net"
 	"os"
 	"sync"
 	"time"
@@ -63,19 +62,29 @@ func (mix *Mix) ReconnectToSuccessor() error {
 
 	if !mix.IsExit {
 
-		session, err := quic.DialAddr(string(mix.ChainMatrix[mix.OwnChain][(mix.OwnIndex+1)].Addr), &tls.Config{
-			InsecureSkipVerify: true,
+		// Extract address and certificate pool to
+		// be used in QUIC connection attempt.
+		addr := string(mix.ChainMatrix[mix.OwnChain][(mix.OwnIndex + 1)].Addr)
+		certPool := mix.ChainMatrix[mix.OwnChain][(mix.OwnIndex + 1)].PubCertPool
+
+		// Dial node via TLS-over-QUIC.
+		session, err := quic.DialAddr(addr, &tls.Config{
+			RootCAs:            certPool,
+			InsecureSkipVerify: false,
+			MinVersion:         tls.VersionTLS13,
+			CurvePreferences:   []tls.CurveID{tls.X25519},
 		}, nil)
 		if err != nil {
 			return err
 		}
 
+		// Upgrade session to blocking stream.
 		stream, err := session.OpenStreamSync()
 		if err != nil {
 			return err
 		}
 
-		// Wrap TCP connection in Cap'n Proto RPC.
+		// Wrap connection in Cap'n Proto RPC.
 		connRCP := capnprpc.NewConn(capnprpc.StreamTransport(stream))
 
 		// Bundle RPC connection in struct on
@@ -83,23 +92,6 @@ func (mix *Mix) ReconnectToSuccessor() error {
 		mix.Successor = &rpc.Mix{
 			Client: connRCP.Bootstrap(context.Background()),
 		}
-
-		/*
-			// Connect to successor mix over TCP.
-			conn, err := net.Dial("tcp", string(mix.ChainMatrix[mix.OwnChain][(mix.OwnIndex+1)].Addr))
-			if err != nil {
-				return err
-			}
-
-			// Wrap TCP connection in Cap'n Proto RPC.
-			connRCP := capnprpc.NewConn(capnprpc.StreamTransport(conn))
-
-			// Bundle RPC connection in struct on
-			// which to call methods later on.
-			mix.Successor = &rpc.Mix{
-				Client: connRCP.Bootstrap(context.Background()),
-			}
-		*/
 	}
 
 	return nil
@@ -145,7 +137,7 @@ func (mix *Mix) AddCoverMsgsToPool(initFirst bool, numClients int, numSamples in
 		if err != nil {
 			return err
 		}
-		convoExitMsg.SetPubKeyOrAddr(mix.KnownClients[chosen].Addr)
+		convoExitMsg.SetPubKeyOrAddr(mix.KnownClients[mix.ChooseClients[chosen]].Addr)
 		convoExitMsg.SetContent(msgPadded[:])
 
 		if mix.IsExit {
@@ -340,6 +332,13 @@ func (mix *Mix) SendOutMsg(msgChan chan *rpc.ConvoMsg) {
 			continue
 		}
 
+		// Find local endpoint mapped to address.
+		client, found := mix.KnownClients[string(addr)]
+		if !found {
+			fmt.Printf("Client to contact not known (no TLS certificate available).\n")
+			continue
+		}
+
 		fmt.Printf("Will send to '%s'\n", string(addr))
 
 		// Extract message to send.
@@ -350,13 +349,27 @@ func (mix *Mix) SendOutMsg(msgChan chan *rpc.ConvoMsg) {
 		}
 
 		// Connect to client node.
-		// TODO: Should this be over TLS not TCP?
-		conn, err := net.Dial("tcp", string(addr))
+		session, err := quic.DialAddr(string(addr), &tls.Config{
+			RootCAs:            client.PubCertPool,
+			InsecureSkipVerify: false,
+			MinVersion:         tls.VersionTLS13,
+			CurvePreferences:   []tls.CurveID{tls.X25519},
+		}, nil)
 		if err != nil {
-			fmt.Printf("Failed connecting to client '%s': %v\n", addr, err)
+			fmt.Printf("Could not connect to client via QUIC: %v\n", err)
 			continue
 		}
-		encoder := gob.NewEncoder(conn)
+		defer session.Close()
+
+		// Upgrade session to blocking stream.
+		stream, err := session.OpenStreamSync()
+		if err != nil {
+			fmt.Printf("Failed to upgrade QUIC session to stream: %v\n", err)
+			continue
+		}
+		defer stream.Close()
+
+		encoder := gob.NewEncoder(stream)
 
 		// Send message content and close connection.
 		err = encoder.Encode(msg)
@@ -364,8 +377,6 @@ func (mix *Mix) SendOutMsg(msgChan chan *rpc.ConvoMsg) {
 			fmt.Printf("Failed sending message to client '%s': %v\n", addr, err)
 			continue
 		}
-
-		conn.Close()
 	}
 }
 

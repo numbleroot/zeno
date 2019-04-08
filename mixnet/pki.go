@@ -3,6 +3,7 @@ package mixnet
 import (
 	"bufio"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"fmt"
 	"net"
@@ -76,7 +77,8 @@ func (node *Node) GetAllClients() error {
 
 	// Parse string into slice of Endpoint.
 	clients := strings.Split(strings.ToLower(strings.Trim(clientsRaw, "\n ")), ";")
-	node.KnownClients = make([]*Endpoint, 0, len(clients))
+	node.KnownClients = make(map[string]*Endpoint)
+	node.ChooseClients = make([]string, 0, len(clients))
 
 	for i := range clients {
 
@@ -100,12 +102,25 @@ func (node *Node) GetAllClients() error {
 				return err
 			}
 
-			// Append as new Endpoint.
-			node.KnownClients = append(node.KnownClients, &Endpoint{
-				Addr:       []byte(client[0]),
-				PubKey:     pubKey,
-				PubCertPEM: pubCertPEM,
-			})
+			// Create new empty cert pool.
+			certPool := x509.NewCertPool()
+
+			// Attempt to add received certificate to pool.
+			ok := certPool.AppendCertsFromPEM(pubCertPEM)
+			if !ok {
+				return fmt.Errorf("failed to add received client's certificate to empty pool")
+			}
+
+			// Append as new Endpoint to map.
+			node.KnownClients[client[0]] = &Endpoint{
+				Addr:        []byte(client[0]),
+				PubKey:      pubKey,
+				PubCertPool: certPool,
+			}
+
+			// Also append only the adress to
+			// clients slice for cover traffic.
+			node.ChooseClients = append(node.ChooseClients, client[0])
 		}
 	}
 
@@ -144,9 +159,26 @@ func (node *Node) ConfigureChainMatrix(connRead *bufio.Reader, connWrite net.Con
 		}
 		copy(pubKey[:], pubKeyRaw)
 
+		// Parse contained TLS certificate in
+		// hex representation to byte slice.
+		pubCertPEM, err := hex.DecodeString(candsParts[2])
+		if err != nil {
+			return err
+		}
+
+		// Create new empty cert pool.
+		certPool := x509.NewCertPool()
+
+		// Attempt to add received certificate to pool.
+		ok := certPool.AppendCertsFromPEM(pubCertPEM)
+		if !ok {
+			return fmt.Errorf("failed to add received mix' certificate to empty pool")
+		}
+
 		cands[i] = &Endpoint{
-			Addr:   []byte(candsParts[0]),
-			PubKey: pubKey,
+			Addr:        []byte(candsParts[0]),
+			PubKey:      pubKey,
+			PubCertPool: certPool,
 		}
 	}
 
