@@ -184,7 +184,7 @@ func (mix *Mix) AddCoverMsgsToPool(initFirst bool, numClients int, numSamples in
 			}
 
 			// Marshal final ConvoExitMsg to byte slice.
-			msg, err := protoMsg.MarshalPacked()
+			msg, err := protoMsg.Marshal()
 			if err != nil {
 				return err
 			}
@@ -216,7 +216,7 @@ func (mix *Mix) AddCoverMsgsToPool(initFirst bool, numClients int, numSamples in
 				convoMixMsg.SetContent(encMsg)
 
 				// Marshal final ConvoMixMsg to byte slice.
-				msg, err = protoMsg.MarshalPacked()
+				msg, err = protoMsg.Marshal()
 				if err != nil {
 					fmt.Printf("Failed marshalling final ConvoMixMsg to []byte: %v\n", err)
 					os.Exit(1)
@@ -347,7 +347,6 @@ func (mix *Mix) SendOutMsg(msgChan chan *rpc.ConvoMsg) {
 			fmt.Printf("Could not connect to client via QUIC: %v\n", err)
 			continue
 		}
-		defer session.Close()
 
 		// Upgrade session to blocking stream.
 		stream, err := session.OpenStreamSync()
@@ -355,7 +354,6 @@ func (mix *Mix) SendOutMsg(msgChan chan *rpc.ConvoMsg) {
 			fmt.Printf("Failed to upgrade QUIC session to stream: %v\n", err)
 			continue
 		}
-		defer stream.Close()
 
 		encoder := gob.NewEncoder(stream)
 
@@ -538,7 +536,7 @@ func (mix *Mix) RotateRoundState() {
 				os.Exit(1)
 			}
 
-			fmt.Printf("[ROTATE] I\n")
+			fmt.Printf("[ROTATE] H\n")
 
 			batch, err := rpc.NewBatch(protoMsgSeg)
 			if err != nil {
@@ -552,20 +550,20 @@ func (mix *Mix) RotateRoundState() {
 				os.Exit(1)
 			}
 
-			fmt.Printf("[ROTATE] J\n")
+			fmt.Printf("[ROTATE] I\n")
 
 			for i := range mix.OutPool {
 				msgs.Set(i, *mix.OutPool[i])
 			}
 
-			data, err := protoMsg.MarshalPacked()
+			data, err := protoMsg.Marshal()
 			if err != nil {
 				fmt.Printf("Rotating round state failed: %v\n", err)
 				os.Exit(1)
 			}
 
 			fmt.Printf("Marshaled batch of length: %d and num msgs: %d\n", len(data), msgs.Len())
-			fmt.Printf("[ROTATE] K\n")
+			fmt.Printf("[ROTATE] J\n")
 
 			// Create buffered I/O reader from connection.
 			connRead := bufio.NewReader(mix.Successor)
@@ -575,12 +573,12 @@ func (mix *Mix) RotateRoundState() {
 			// Send length of byte slice that will follow.
 			fmt.Fprintf(mix.Successor, "%d\n", len(data))
 
-			fmt.Printf("[ROTATE] L\n")
+			fmt.Printf("[ROTATE] K\n")
 
 			// Send marshaled batch.
 			fmt.Fprintf(mix.Successor, "%v", data)
 
-			fmt.Printf("[ROTATE] M\n")
+			fmt.Printf("[ROTATE] L\n")
 
 			// Expect status response.
 			status, err := connRead.ReadString('\n')
@@ -590,13 +588,15 @@ func (mix *Mix) RotateRoundState() {
 			}
 			status = strings.ToLower(strings.Trim(status, "\n "))
 
+			fmt.Printf("[ROTATE] M\n")
+
 			if status != "0" {
 				fmt.Printf("Rotating round state failed: successor mix returned non-zero response: %s\n", status)
 				os.Exit(1)
 			}
 		}
 
-		fmt.Printf("[ROTATE] K\n")
+		fmt.Printf("[ROTATE] N\n")
 
 		// Wait for cover traffic generation to finish.
 		err = <-coverGenErrChan
@@ -605,15 +605,13 @@ func (mix *Mix) RotateRoundState() {
 			os.Exit(1)
 		}
 
-		fmt.Printf("[ROTATE] L\n")
+		fmt.Printf("[ROTATE] O\n")
 	}
 }
 
 // AddConvoMsg enables a client to deliver
 // a conversation message to an entry mix.
-func (mix *Mix) AddConvoMsg(connRead *bufio.Reader, connWrite quic.Stream, sender string) {
-
-	defer connWrite.Close()
+func (mix *Mix) AddConvoMsg(session quic.Session, connRead *bufio.Reader, connWrite quic.Stream, sender string) {
 
 	// Wrap connection from client in efficient
 	// decoder for ConvoMsg structs.
@@ -638,14 +636,16 @@ func (mix *Mix) AddConvoMsg(connRead *bufio.Reader, connWrite quic.Stream, sende
 	// Decrypt message content.
 	convoMsgRaw, ok := box.Open(nil, encConvoMsg.Content[24:], nonce, encConvoMsg.PubKey, mix.RecvSecKey)
 	if !ok {
+
 		fmt.Printf("Failed to decrypt received conversation message by client %s\n", sender)
 		fmt.Fprintf(connWrite, "1\n")
+
 		return
 	}
 
 	// Unmarshal packed convo message from
 	// byte slice to Cap'n Proto message.
-	convoMsgProto, err := capnp.UnmarshalPacked(convoMsgRaw)
+	convoMsgProto, err := capnp.Unmarshal(convoMsgRaw)
 	if err != nil {
 
 		fmt.Printf("Error unmarshaling received contained message by client %s: %v\n", sender, err)
@@ -696,7 +696,7 @@ func (mix *Mix) HandleBatchMsgs(connRead *bufio.Reader, connWrite quic.Stream, s
 
 	// Ensure only the predecessor mix is able to
 	// take up this mix node's compute ressources.
-	if sender != mix.ChainMatrix[mix.OwnChain][(mix.OwnIndex-1)].Addr {
+	if sender != strings.Split(mix.ChainMatrix[mix.OwnChain][(mix.OwnIndex-1)].Addr, ":")[0] {
 		fmt.Printf("Node at '%s' tried to send a message batch but we expect predecessor '%s'.\n", sender, string(mix.ChainMatrix[mix.OwnChain][(mix.OwnIndex-1)].Addr))
 		return
 	}
@@ -731,7 +731,7 @@ func (mix *Mix) HandleBatchMsgs(connRead *bufio.Reader, connWrite quic.Stream, s
 
 	fmt.Printf("Read message batch of size '%d' bytes from connection\n", len(batchRaw))
 
-	batchProto, err := capnp.UnmarshalPacked(batchRaw)
+	batchProto, err := capnp.Unmarshal(batchRaw)
 	if err != nil {
 		fmt.Printf("Error unmarshaling received message batch: %v\n", err)
 		os.Exit(1)
@@ -788,7 +788,7 @@ func (mix *Mix) HandleBatchMsgs(connRead *bufio.Reader, connWrite quic.Stream, s
 
 		// Unmarshal packed convo message from
 		// byte slice to Cap'n Proto message.
-		convoMsgProto, err := capnp.UnmarshalPacked(convoMsgRaw)
+		convoMsgProto, err := capnp.Unmarshal(convoMsgRaw)
 		if err != nil {
 			fmt.Printf("Error unmarshaling received contained message: %v\n", err)
 			os.Exit(1)

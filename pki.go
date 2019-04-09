@@ -28,14 +28,12 @@ func (node *Node) RegisterAtPKI(category string) error {
 	if err != nil {
 		return err
 	}
-	defer session.Close()
 
 	// Upgrade session to blocking stream.
 	connWrite, err := session.OpenStreamSync()
 	if err != nil {
 		return err
 	}
-	defer connWrite.Close()
 
 	// Create buffered I/O reader from connection.
 	connRead := bufio.NewReader(connWrite)
@@ -68,14 +66,12 @@ func (node *Node) GetAllClients() error {
 	if err != nil {
 		return err
 	}
-	defer session.Close()
 
 	// Upgrade session to blocking stream.
 	connWrite, err := session.OpenStreamSync()
 	if err != nil {
 		return err
 	}
-	defer connWrite.Close()
 
 	// Create buffered I/O reader from connection.
 	connRead := bufio.NewReader(connWrite)
@@ -148,8 +144,6 @@ func (node *Node) GetAllClients() error {
 // the deterministic cascades election that
 // are captured in chain matrix afterwards.
 func (node *Node) ConfigureChainMatrix(connRead *bufio.Reader, connWrite quic.Stream) error {
-
-	defer connWrite.Close()
 
 	// Receive candidates string from PKI.
 	candsMsg, err := connRead.ReadString('\n')

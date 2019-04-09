@@ -92,7 +92,7 @@ func (cl *Client) OnionEncryptAndSend(text string, recipient string, chain int) 
 	convoMsg.SetContent(msgPadded[:])
 
 	// Marshal final convoMsg to byte slice.
-	origMsg, err := protoMsg.MarshalPacked()
+	origMsg, err := protoMsg.Marshal()
 	if err != nil {
 		fmt.Printf("Failed marshalling ConvoMsg to []byte: %v\n", err)
 		os.Exit(1)
@@ -130,7 +130,7 @@ func (cl *Client) OnionEncryptAndSend(text string, recipient string, chain int) 
 			onionMsg.SetContent(encMsg)
 
 			// Marshal final ConvoMsg to byte slice.
-			msg, err = protoMsg.MarshalPacked()
+			msg, err = protoMsg.Marshal()
 			if err != nil {
 				fmt.Printf("Failed marshalling ConvoMsg to []byte: %v\n", err)
 				os.Exit(1)
@@ -153,7 +153,6 @@ func (cl *Client) OnionEncryptAndSend(text string, recipient string, chain int) 
 			fmt.Printf("Failed connecting to entry mix of cascade %d via QUIC: %v\n", chain, err)
 			os.Exit(1)
 		}
-		defer session.Close()
 
 		// Upgrade session to blocking stream.
 		stream, err := session.OpenStreamSync()
@@ -161,7 +160,6 @@ func (cl *Client) OnionEncryptAndSend(text string, recipient string, chain int) 
 			fmt.Printf("Failed to upgrade QUIC session to stream: %v\n", err)
 			os.Exit(1)
 		}
-		defer stream.Close()
 
 		// Create buffered I/O reader from connection.
 		connRead := bufio.NewReader(stream)

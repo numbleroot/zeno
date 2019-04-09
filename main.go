@@ -225,7 +225,7 @@ func main() {
 				// At entry mixes we only receive single
 				// conversation messages from clients.
 				// We handle them directly.
-				go mix.AddConvoMsg(connRead, connWrite, sender)
+				go mix.AddConvoMsg(session, connRead, connWrite, sender)
 
 			} else {
 
