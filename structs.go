@@ -1,9 +1,8 @@
-package mixnet
+package main
 
 import (
 	"crypto/tls"
 	"crypto/x509"
-	"net"
 	"sync"
 	"time"
 
@@ -15,7 +14,7 @@ import (
 // entity on address associated with a
 // public key.
 type Endpoint struct {
-	Addr        []byte
+	Addr        string
 	PubKey      *[32]byte
 	PubCertPool *x509.CertPool
 }
@@ -45,14 +44,15 @@ type ConvoMsg struct {
 type Node struct {
 	RecvPubKey            *[32]byte
 	RecvSecKey            *[32]byte
-	PKIAddr               string
-	PKILisAddr            string
-	PKITLSConf            *tls.Config
-	PKIListener           net.Listener
 	PubLisAddr            string
-	PubTLSConf            *tls.Config
+	PubTLSConfAsServer    *tls.Config
 	PubCertPEM            []byte
 	PubListener           quic.Listener
+	PKIAddr               string
+	PKILisAddr            string
+	PKITLSConfAsClient    *tls.Config
+	PKITLSConfAsServer    *tls.Config
+	PKIListener           quic.Listener
 	ChainMatrixConfigured chan struct{}
 	ChainMatrix           [][]*Endpoint
 	KnownClients          map[string]*Endpoint
@@ -63,10 +63,9 @@ type Node struct {
 // our system architecture.
 type Client struct {
 	*Node
-	SendWG     *sync.WaitGroup
-	EntryConns []*rpc.Mix
-	CurRound   [][]*OnionKeyState
-	PrevRound  [][]*OnionKeyState
+	SendWG    *sync.WaitGroup
+	CurRound  [][]*OnionKeyState
+	PrevRound [][]*OnionKeyState
 }
 
 // Mix represents a mix node in our
@@ -77,7 +76,7 @@ type Mix struct {
 	OwnIndex    int
 	IsEntry     bool
 	IsExit      bool
-	Successor   *rpc.Mix
+	Successor   quic.Stream
 	RoundTicker *time.Ticker
 	muAddMsgs   *sync.Mutex
 	ClientsSeen map[string]bool

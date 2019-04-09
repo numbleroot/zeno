@@ -3,20 +3,15 @@ package main
 import (
 	"bufio"
 	"crypto/rand"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/gob"
 	"flag"
 	"fmt"
-	"io/ioutil"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 
 	"github.com/lucas-clemente/quic-go"
-	"github.com/numbleroot/zeno/mixnet"
 	"golang.org/x/crypto/nacl/box"
 )
 
@@ -67,67 +62,51 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Read PKI server TLS certificate from
-	// specified file system location.
-	pkiCert, err := ioutil.ReadFile(pkiCertPath)
-	if err != nil {
-		fmt.Printf("Failed to load PKI server TLS certificate from path '%s': %v\n", pkiCertPath, err)
-		os.Exit(1)
-	}
-
-	// Create new empty cert pool.
-	pkiCertRoot := x509.NewCertPool()
-
-	// Attempt to add the loaded PKI server certificate.
-	ok := pkiCertRoot.AppendCertsFromPEM(pkiCert)
-	if !ok {
-		fmt.Printf("Failed to add PKI server TLS certificate to pool: %v\n", err)
-		os.Exit(1)
-	}
-
 	// Generate ephemeral TLS certificate and config
 	// for public listener.
-	pubTLSConf, pubCertPEM, err := GenTLSCertAndConf("localhost", strings.Split(msgLisAddr, ":")[0])
+	pubTLSConfAsServer, pubCertPEM, err := GenPubTLSCertAndConf("localhost", strings.Split(msgLisAddr, ":")[0])
 	if err != nil {
 		fmt.Printf("Failed generating ephemeral TLS certificate and config: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Construct common node characteristics.
-	node := &mixnet.Node{
-		RecvPubKey: recvPubKey,
-		RecvSecKey: recvSecKey,
-		PKIAddr:    pkiAddr,
-		PKILisAddr: pkiLisAddr,
-		PKITLSConf: &tls.Config{
-			RootCAs:            pkiCertRoot,
-			InsecureSkipVerify: false,
-			MinVersion:         tls.VersionTLS13,
-			CurvePreferences:   []tls.CurveID{tls.X25519},
-		},
+	// Obtain strong and suitable TLS configuration
+	// to use when contacting the PKI server.
+	pkiTLSConfAsClient, err := GenPKITLSConf(pkiCertPath)
+	if err != nil {
+		fmt.Printf("Failed putting together PKI server TLS configuration: %v\n", err)
+		os.Exit(1)
+	}
+
+	node := &Node{
+		RecvPubKey:            recvPubKey,
+		RecvSecKey:            recvSecKey,
 		PubLisAddr:            msgLisAddr,
-		PubTLSConf:            pubTLSConf,
+		PubTLSConfAsServer:    pubTLSConfAsServer,
 		PubCertPEM:            pubCertPEM,
+		PKIAddr:               pkiAddr,
+		PKILisAddr:            pkiLisAddr,
+		PKITLSConfAsClient:    pkiTLSConfAsClient,
+		PKITLSConfAsServer:    pubTLSConfAsServer,
 		ChainMatrixConfigured: make(chan struct{}),
 	}
 
-	// Open up socket for eventual chain matrix
-	// election data from PKI.
-	// TODO: Should this be over TLS not TCP?
-	node.PKIListener, err = net.Listen("tcp", node.PKILisAddr)
-	if err != nil {
-		fmt.Printf("Failed to listen for PKI information on socket %s: %v\n", node.PKILisAddr, err)
-		os.Exit(1)
-	}
-	defer node.PKIListener.Close()
-
 	// Start listening for incoming mix-net messages.
-	node.PubListener, err = quic.ListenAddr(node.PubLisAddr, node.PubTLSConf, nil)
+	node.PubListener, err = quic.ListenAddr(node.PubLisAddr, node.PubTLSConfAsServer, nil)
 	if err != nil {
 		fmt.Printf("Failed to listen for mix-net messages on socket %s: %v\n", node.PubLisAddr, err)
 		os.Exit(1)
 	}
 	defer node.PubListener.Close()
+
+	// Open up socket for eventual chain matrix
+	// election data from PKI.
+	node.PKIListener, err = quic.ListenAddr(node.PKILisAddr, node.PKITLSConfAsServer, nil)
+	if err != nil {
+		fmt.Printf("Failed to listen for PKI information on socket %s: %v\n", node.PKILisAddr, err)
+		os.Exit(1)
+	}
+	defer node.PKIListener.Close()
 
 	// Handle messages from PKI.
 	go node.HandlePKIMsgs()
@@ -194,7 +173,7 @@ func main() {
 		// This node is a mix and was elected
 		// to be part of the chain matrix.
 
-		mix := &mixnet.Mix{
+		mix := &Mix{
 			Node: node,
 		}
 
@@ -228,19 +207,20 @@ func main() {
 				continue
 			}
 
+			// Upgrade session to stream.
 			connWrite, err := session.AcceptStream()
 			if err != nil {
 				fmt.Printf("Failed accepting incoming stream: %v\n", err)
 				continue
 			}
 
+			// Create buffered I/O reader from connection.
+			connRead := bufio.NewReader(connWrite)
+
 			sender := strings.Split(session.RemoteAddr().String(), ":")[0]
 			fmt.Printf("Sender: '%s'\n", sender)
 
 			if mix.IsEntry {
-
-				// Create buffered I/O reader from connection.
-				connRead := bufio.NewReader(connWrite)
 
 				// At entry mixes we only receive single
 				// conversation messages from clients.
@@ -251,7 +231,7 @@ func main() {
 
 				// At non-entry mixes we only expect to receive
 				// Cap'n Proto batch messages.
-				go mix.HandleBatchMsgs(connWrite, sender)
+				go mix.HandleBatchMsgs(connRead, connWrite, sender)
 			}
 		}
 
@@ -259,7 +239,7 @@ func main() {
 
 		// This node is a client.
 
-		client := &mixnet.Client{
+		client := &Client{
 			Node:   node,
 			SendWG: &sync.WaitGroup{},
 		}
@@ -276,6 +256,7 @@ func main() {
 				continue
 			}
 
+			// Upgrade session to stream.
 			connWrite, err := session.AcceptStream()
 			if err != nil {
 				fmt.Printf("Failed accepting incoming stream: %v\n", err)

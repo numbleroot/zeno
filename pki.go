@@ -1,15 +1,15 @@
-package mixnet
+package main
 
 import (
 	"bufio"
-	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
 	"fmt"
-	"net"
 	"os"
 	"sort"
 	"strings"
+
+	"github.com/lucas-clemente/quic-go"
 )
 
 // Enable TLS 1.3.
@@ -24,10 +24,18 @@ func init() {
 func (node *Node) RegisterAtPKI(category string) error {
 
 	// Connect to PKI TLS endpoint.
-	connWrite, err := tls.Dial("tcp", node.PKIAddr, node.PKITLSConf)
+	session, err := quic.DialAddr(node.PKIAddr, node.PKITLSConfAsClient, nil)
 	if err != nil {
 		return err
 	}
+	defer session.Close()
+
+	// Upgrade session to blocking stream.
+	connWrite, err := session.OpenStreamSync()
+	if err != nil {
+		return err
+	}
+	defer connWrite.Close()
 
 	// Create buffered I/O reader from connection.
 	connRead := bufio.NewReader(connWrite)
@@ -48,8 +56,6 @@ func (node *Node) RegisterAtPKI(category string) error {
 		return fmt.Errorf("PKI returned failure response to mix intent registration: %s", resp)
 	}
 
-	connWrite.Close()
-
 	return nil
 }
 
@@ -58,10 +64,18 @@ func (node *Node) RegisterAtPKI(category string) error {
 func (node *Node) GetAllClients() error {
 
 	// Connect to PKI TLS endpoint.
-	connWrite, err := tls.Dial("tcp", node.PKIAddr, node.PKITLSConf)
+	session, err := quic.DialAddr(node.PKIAddr, node.PKITLSConfAsClient, nil)
 	if err != nil {
 		return err
 	}
+	defer session.Close()
+
+	// Upgrade session to blocking stream.
+	connWrite, err := session.OpenStreamSync()
+	if err != nil {
+		return err
+	}
+	defer connWrite.Close()
 
 	// Create buffered I/O reader from connection.
 	connRead := bufio.NewReader(connWrite)
@@ -77,6 +91,8 @@ func (node *Node) GetAllClients() error {
 
 	// Parse string into slice of Endpoint.
 	clients := strings.Split(strings.ToLower(strings.Trim(clientsRaw, "\n ")), ";")
+
+	// Prepare internal state tracking objects.
 	node.KnownClients = make(map[string]*Endpoint)
 	node.ChooseClients = make([]string, 0, len(clients))
 
@@ -113,7 +129,7 @@ func (node *Node) GetAllClients() error {
 
 			// Append as new Endpoint to map.
 			node.KnownClients[client[0]] = &Endpoint{
-				Addr:        []byte(client[0]),
+				Addr:        client[0],
 				PubKey:      pubKey,
 				PubCertPool: certPool,
 			}
@@ -131,7 +147,9 @@ func (node *Node) GetAllClients() error {
 // set of cascade candidates and executes
 // the deterministic cascades election that
 // are captured in chain matrix afterwards.
-func (node *Node) ConfigureChainMatrix(connRead *bufio.Reader, connWrite net.Conn) error {
+func (node *Node) ConfigureChainMatrix(connRead *bufio.Reader, connWrite quic.Stream) error {
+
+	defer connWrite.Close()
 
 	// Receive candidates string from PKI.
 	candsMsg, err := connRead.ReadString('\n')
@@ -176,7 +194,7 @@ func (node *Node) ConfigureChainMatrix(connRead *bufio.Reader, connWrite net.Con
 		}
 
 		cands[i] = &Endpoint{
-			Addr:        []byte(candsParts[0]),
+			Addr:        candsParts[0],
 			PubKey:      pubKey,
 			PubCertPool: certPool,
 		}
@@ -212,8 +230,6 @@ func (node *Node) ConfigureChainMatrix(connRead *bufio.Reader, connWrite net.Con
 	// Signal channel node.ChainMatrixConfigured.
 	node.ChainMatrixConfigured <- struct{}{}
 
-	connWrite.Close()
-
 	return nil
 }
 
@@ -225,9 +241,16 @@ func (node *Node) HandlePKIMsgs() {
 	for {
 
 		// Wait for incoming connections from PKI.
-		connWrite, err := node.PKIListener.Accept()
+		session, err := node.PKIListener.Accept()
 		if err != nil {
 			fmt.Printf("Error accepting connection from PKI: %v\n", err)
+			continue
+		}
+
+		// Upgrade session to synchronous stream.
+		connWrite, err := session.AcceptStream()
+		if err != nil {
+			fmt.Printf("Failed accepting incoming stream from PKI: %v\n", err)
 			continue
 		}
 

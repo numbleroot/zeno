@@ -11,7 +11,3 @@ struct ConvoMsg {
 struct Batch {
     msgs @0 :List(ConvoMsg);
 }
-
-interface Mix {
-    addBatch @0 (batch :Batch) -> (status :UInt8);
-}

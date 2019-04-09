@@ -1,4 +1,4 @@
-package mixnet
+package main
 
 import "fmt"
 

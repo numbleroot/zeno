@@ -1,4 +1,4 @@
-package mixnet
+package main
 
 import (
 	"bufio"
@@ -11,10 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/crypto/nacl/box"
-
 	"github.com/lucas-clemente/quic-go"
 	"github.com/numbleroot/zeno/rpc"
+	"golang.org/x/crypto/nacl/box"
 	capnp "zombiezen.com/go/capnproto2"
 )
 
@@ -93,7 +92,7 @@ func (cl *Client) OnionEncryptAndSend(text string, recipient string, chain int) 
 	convoMsg.SetContent(msgPadded[:])
 
 	// Marshal final convoMsg to byte slice.
-	origMsg, err := protoMsg.Marshal()
+	origMsg, err := protoMsg.MarshalPacked()
 	if err != nil {
 		fmt.Printf("Failed marshalling ConvoMsg to []byte: %v\n", err)
 		os.Exit(1)
@@ -131,7 +130,7 @@ func (cl *Client) OnionEncryptAndSend(text string, recipient string, chain int) 
 			onionMsg.SetContent(encMsg)
 
 			// Marshal final ConvoMsg to byte slice.
-			msg, err = protoMsg.Marshal()
+			msg, err = protoMsg.MarshalPacked()
 			if err != nil {
 				fmt.Printf("Failed marshalling ConvoMsg to []byte: %v\n", err)
 				os.Exit(1)
@@ -193,10 +192,10 @@ func (cl *Client) OnionEncryptAndSend(text string, recipient string, chain int) 
 		status = strings.ToLower(strings.Trim(status, "\n "))
 
 		if status != "0" {
-			fmt.Printf("Received error code %v from entry mix '%s', will try again...\n", status, cl.ChainMatrix[chain][0].Addr)
+			fmt.Printf("Backing off, will try again...\n")
 			time.Sleep((((RoundTime) / 2) + (50 * time.Millisecond)))
 		} else {
-			fmt.Printf("Successfully delivered message to entry mix '%s', moving on to next message.\n\n", cl.ChainMatrix[chain][0].Addr)
+			fmt.Printf("Successfully delivered message to entry mix '%s'.\n\n", cl.ChainMatrix[chain][0].Addr)
 		}
 	}
 
@@ -220,22 +219,22 @@ func (cl *Client) SendMsg() {
 		{"lorem ipsum dolor sit cannot be missing of course", "127.0.0.1:11111"},
 		{"TweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweet", "127.0.0.1:11111"},
 		{"All human beings are born free and equal in dignity and rights. They are endowed with reason and conscience and should act towards one another in a spirit of brotherhood. Everyone is entitled to all the rights and freedoms set forth in this Declaration, without distinction of any kind, such as race, colour, sex, language, religion, political or other opinion, national or social origin, property, birth or other status. Furthermore, no distinction shall be made on the basis of the political, jurisdictional or international status of the country or territory to which a person belongs, whether it be independent, trust, non-self-governing or under any other limitation of sovereignty.", "127.0.0.1:11111"},
-		{"AA", "127.0.0.1:11111"},
-		{"BB", "127.0.0.1:11111"},
-		{"CC", "127.0.0.1:11111"},
-		{"DD", "127.0.0.1:11111"},
-		{"EE", "127.0.0.1:11111"},
-		{"FF", "127.0.0.1:11111"},
-		{"GG", "127.0.0.1:11111"},
-		{"HH", "127.0.0.1:11111"},
-		{"II", "127.0.0.1:11111"},
-		{"JJ", "127.0.0.1:11111"},
-		{"KK", "127.0.0.1:11111"},
-		{"LL", "127.0.0.1:11111"},
-		{"MM", "127.0.0.1:11111"},
-		{"NN", "127.0.0.1:11111"},
-		{"OO", "127.0.0.1:11111"},
-		{"PP", "127.0.0.1:11111"},
+		{"abc", "127.0.0.1:11111"},
+		{"def", "127.0.0.1:11111"},
+		{"ghi", "127.0.0.1:11111"},
+		{"jkl", "127.0.0.1:11111"},
+		{"mno", "127.0.0.1:11111"},
+		{"pqr", "127.0.0.1:11111"},
+		{"stu", "127.0.0.1:11111"},
+		{"vwx", "127.0.0.1:11111"},
+		{"yz0", "127.0.0.1:11111"},
+		{"123", "127.0.0.1:11111"},
+		{"456", "127.0.0.1:11111"},
+		{"789", "127.0.0.1:11111"},
+		{"äöü", "127.0.0.1:11111"},
+		{"ßßß", "127.0.0.1:11111"},
+		{"*#_", "127.0.0.1:11111"},
+		{".:,", "127.0.0.1:11111"},
 	}
 
 	for t := range tests {

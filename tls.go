@@ -8,19 +8,51 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"fmt"
+	"io/ioutil"
 	"math/big"
 	"net"
 	"time"
 )
 
-// GenTLSCertAndConf takes care of generating an
+// GenPKITLSConf puts together a strong TLS
+// configuration to be used when contacting the
+// PKI server. It expects the certificate path
+// of the PKI server.
+func GenPKITLSConf(certPath string) (*tls.Config, error) {
+
+	// Read PKI server TLS certificate from
+	// specified file system location.
+	pkiCert, err := ioutil.ReadFile(certPath)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create new empty cert pool.
+	pkiCertRoot := x509.NewCertPool()
+
+	// Attempt to add the loaded PKI server certificate.
+	ok := pkiCertRoot.AppendCertsFromPEM(pkiCert)
+	if !ok {
+		return nil, fmt.Errorf("failed appending loaded PKI server TLS certificate to pool")
+	}
+
+	return &tls.Config{
+		RootCAs:            pkiCertRoot,
+		InsecureSkipVerify: false,
+		MinVersion:         tls.VersionTLS13,
+		CurvePreferences:   []tls.CurveID{tls.X25519},
+	}, nil
+}
+
+// GenPubTLSCertAndConf takes care of generating an
 // ephemeral TLS certificate based on Elliptic Curve
 // Cryptography for supplied FQDN and IP address to
 // listen on. A properly configured TLS configuration
 // and the PEM-encoded certificate are returned.
 // This function takes heavy inspiration from:
 // https://golang.org/src/crypto/tls/generate_cert.go
-func GenTLSCertAndConf(listenFQDN string, listenIP string) (*tls.Config, []byte, error) {
+func GenPubTLSCertAndConf(listenFQDN string, listenIP string) (*tls.Config, []byte, error) {
 
 	now := time.Now()
 
