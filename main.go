@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"crypto/rand"
 	"encoding/gob"
 	"flag"
@@ -198,40 +197,57 @@ func main() {
 		// protocol in background.
 		go mix.RotateRoundState()
 
-		for {
+		if mix.IsEntry {
+
+			for {
+
+				// Wait for incoming connections on public socket.
+				session, err := mix.PubListener.Accept()
+				if err != nil {
+					fmt.Printf("Public connection error: %v\n", err)
+					continue
+				}
+
+				// Upgrade session to stream.
+				connWrite, err := session.AcceptStream()
+				if err != nil {
+					fmt.Printf("Failed accepting incoming stream: %v\n", err)
+					continue
+				}
+
+				sender := strings.Split(session.RemoteAddr().String(), ":")[0]
+				fmt.Printf("Sender: '%s'\n", sender)
+
+				// At entry mixes we only receive single
+				// conversation messages from clients.
+				// We handle them directly.
+				go mix.AddConvoMsg(connWrite, sender)
+			}
+		} else {
 
 			// Wait for incoming connections on public socket.
 			session, err := mix.PubListener.Accept()
 			if err != nil {
 				fmt.Printf("Public connection error: %v\n", err)
-				continue
+				os.Exit(1)
 			}
 
 			// Upgrade session to stream.
 			connWrite, err := session.AcceptStream()
 			if err != nil {
 				fmt.Printf("Failed accepting incoming stream: %v\n", err)
-				continue
+				os.Exit(1)
 			}
-
-			// Create buffered I/O reader from connection.
-			connRead := bufio.NewReader(connWrite)
 
 			sender := strings.Split(session.RemoteAddr().String(), ":")[0]
 			fmt.Printf("Sender: '%s'\n", sender)
 
-			if mix.IsEntry {
-
-				// At entry mixes we only receive single
-				// conversation messages from clients.
-				// We handle them directly.
-				go mix.AddConvoMsg(session, connRead, connWrite, sender)
-
-			} else {
-
-				// At non-entry mixes we only expect to receive
-				// Cap'n Proto batch messages.
-				go mix.HandleBatchMsgs(connRead, connWrite, sender)
+			// At non-entry mixes we only expect to receive
+			// Cap'n Proto batch messages.
+			err = mix.HandleBatchMsgs(connWrite, sender)
+			if err != nil {
+				fmt.Printf("Failed to handle batch messages: %v\n", err)
+				os.Exit(1)
 			}
 		}
 

@@ -92,7 +92,7 @@ func (cl *Client) OnionEncryptAndSend(text string, recipient string, chain int) 
 	convoMsg.SetContent(msgPadded[:])
 
 	// Marshal final convoMsg to byte slice.
-	origMsg, err := protoMsg.Marshal()
+	origMsg, err := protoMsg.MarshalPacked()
 	if err != nil {
 		fmt.Printf("Failed marshalling ConvoMsg to []byte: %v\n", err)
 		os.Exit(1)
@@ -130,7 +130,7 @@ func (cl *Client) OnionEncryptAndSend(text string, recipient string, chain int) 
 			onionMsg.SetContent(encMsg)
 
 			// Marshal final ConvoMsg to byte slice.
-			msg, err = protoMsg.Marshal()
+			msg, err = protoMsg.MarshalPacked()
 			if err != nil {
 				fmt.Printf("Failed marshalling ConvoMsg to []byte: %v\n", err)
 				os.Exit(1)
@@ -190,7 +190,6 @@ func (cl *Client) OnionEncryptAndSend(text string, recipient string, chain int) 
 		status = strings.ToLower(strings.Trim(status, "\n "))
 
 		if status != "0" {
-			fmt.Printf("Backing off, will try again...\n")
 			time.Sleep((((RoundTime) / 2) + (50 * time.Millisecond)))
 		} else {
 			fmt.Printf("Successfully delivered message to entry mix '%s'.\n\n", cl.ChainMatrix[chain][0].Addr)
