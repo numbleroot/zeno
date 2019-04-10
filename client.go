@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"crypto/rand"
 	"crypto/tls"
-	"encoding/gob"
 	"fmt"
 	"io"
 	"os"
@@ -141,6 +140,22 @@ func (cl *Client) OnionEncryptAndSend(text string, recipient string, chain int) 
 		// symmetrically encrypt the current message.
 		encMsg := box.SealAfterPrecomputation(cl.CurRound[chain][0].Nonce[:], msg, cl.CurRound[chain][0].Nonce, cl.CurRound[chain][0].SymKey)
 
+		// Create empty Cap'n Proto messsage.
+		protoMsg, protoMsgSeg, err := capnp.NewMessage(capnp.SingleSegment(nil))
+		if err != nil {
+			fmt.Printf("Failed creating empty Cap'n Proto message: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Create new ConvoMsg and insert values.
+		onionMsg, err := rpc.NewRootConvoMsg(protoMsgSeg)
+		if err != nil {
+			fmt.Printf("Failed creating new root ConvoMsg: %v\n", err)
+			os.Exit(1)
+		}
+		onionMsg.SetPubKeyOrAddr(cl.CurRound[chain][0].PubKey[:])
+		onionMsg.SetContent(encMsg)
+
 		// Connect to this cascade's entry mix
 		// via TLS-over-QUIC.
 		session, err := quic.DialAddr(string(cl.ChainMatrix[chain][0].Addr), &tls.Config{
@@ -164,18 +179,10 @@ func (cl *Client) OnionEncryptAndSend(text string, recipient string, chain int) 
 		// Create buffered I/O reader from connection.
 		connRead := bufio.NewReader(stream)
 
-		// Wrap TCP connection in efficient encoder
-		// for transmitting structs.
-		encoder := gob.NewEncoder(stream)
-
-		// Encode and send conversation message to
-		// this cascade's entry mix.
-		err = encoder.Encode(ConvoMsg{
-			PubKey:  cl.CurRound[chain][0].PubKey,
-			Content: encMsg,
-		})
+		// Encode message in packed format and send it via stream.
+		err = capnp.NewPackedEncoder(stream).Encode(protoMsg)
 		if err != nil {
-			fmt.Printf("Error while sending onion-encrypted message to entry mix %s: %v\n", cl.ChainMatrix[chain][0].Addr, err)
+			fmt.Printf("Failed to encode and send onion-encrypted message to entry mix %s: %v\n", cl.ChainMatrix[chain][0].Addr, err)
 			os.Exit(1)
 		}
 

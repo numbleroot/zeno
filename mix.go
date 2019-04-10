@@ -513,18 +513,21 @@ func (mix *Mix) RotateRoundState() {
 
 		} else {
 
+			// Create new empty Cap'n Proto message.
 			protoMsg, protoMsgSeg, err := capnp.NewMessage(capnp.SingleSegment(nil))
 			if err != nil {
 				fmt.Printf("Rotating round state failed: %v\n", err)
 				os.Exit(1)
 			}
 
+			// Create new empty batch message.
 			batch, err := rpc.NewRootBatch(protoMsgSeg)
 			if err != nil {
 				fmt.Printf("Rotating round state failed: %v\n", err)
 				os.Exit(1)
 			}
 
+			// Prepare a list of messages of fitting size.
 			msgs, err := batch.NewMsgs(int32(len(mix.OutPool)))
 			if err != nil {
 				fmt.Printf("Rotating round state failed: %v\n", err)
@@ -535,6 +538,7 @@ func (mix *Mix) RotateRoundState() {
 				msgs.Set(i, *mix.OutPool[i])
 			}
 
+			// Encode message in packed mode and send it via stream.
 			err = capnp.NewPackedEncoder(mix.Successor).Encode(protoMsg)
 			if err != nil {
 				fmt.Printf("Rotating round state failed: %v\n", err)
@@ -555,17 +559,46 @@ func (mix *Mix) RotateRoundState() {
 // a conversation message to an entry mix.
 func (mix *Mix) AddConvoMsg(connWrite quic.Stream, sender string) {
 
-	// Wrap connection from client in efficient
-	// decoder for ConvoMsg structs.
-	decoder := gob.NewDecoder(connWrite)
-
-	// Expect to receive a ConvoMsg struct.
-	encConvoMsg := &ConvoMsg{}
-	err := decoder.Decode(encConvoMsg)
+	// Decode message in packed format from stream.
+	encConvoMsgWire, err := capnp.NewPackedDecoder(connWrite).Decode()
 	if err != nil {
 
-		fmt.Printf("Error decoding struct received from client: %v\n", err)
-		fmt.Fprintf(connWrite, "%v\n", err)
+		fmt.Printf("Error decoding packed message from client: %v\n", err)
+		fmt.Fprintf(connWrite, "1\n")
+
+		return
+	}
+
+	// Extract contained encrypted conversation message.
+	encConvoMsgRaw, err := rpc.ReadRootConvoMsg(encConvoMsgWire)
+	if err != nil {
+
+		fmt.Printf("Failed reading root conversation message from client message: %v\n", err)
+		fmt.Fprintf(connWrite, "1\n")
+
+		return
+	}
+
+	// Extract public key used during encryption
+	// of onionized message from convo message.
+	pubKey := new([32]byte)
+	pubKeyRaw, err := encConvoMsgRaw.PubKeyOrAddr()
+	if err != nil {
+
+		fmt.Printf("Failed to extract public key from conversation message: %v\n", err)
+		fmt.Fprintf(connWrite, "1\n")
+
+		return
+	}
+	copy(pubKey[:], pubKeyRaw)
+
+	// Extract packed forward message from
+	// received convo message.
+	encConvoMsg, err := encConvoMsgRaw.Content()
+	if err != nil {
+
+		fmt.Printf("Failed to extract content from conversation message: %v\n", err)
+		fmt.Fprintf(connWrite, "1\n")
 
 		return
 	}
@@ -573,10 +606,10 @@ func (mix *Mix) AddConvoMsg(connWrite quic.Stream, sender string) {
 	// Extract nonce used during encryption
 	// of onionized message from convo message.
 	nonce := new([24]byte)
-	copy(nonce[:], encConvoMsg.Content[:24])
+	copy(nonce[:], encConvoMsg[:24])
 
 	// Decrypt message content.
-	convoMsgRaw, ok := box.Open(nil, encConvoMsg.Content[24:], nonce, encConvoMsg.PubKey, mix.RecvSecKey)
+	convoMsgRaw, ok := box.Open(nil, encConvoMsg[24:], nonce, pubKey, mix.RecvSecKey)
 	if !ok {
 
 		fmt.Printf("Failed to decrypt received conversation message by client %s\n", sender)
@@ -639,16 +672,18 @@ func (mix *Mix) HandleBatchMsgs(connWrite quic.Stream, sender string) error {
 	// Ensure only the predecessor mix is able to
 	// take up this mix node's compute ressources.
 	if sender != strings.Split(mix.ChainMatrix[mix.OwnChain][(mix.OwnIndex-1)].Addr, ":")[0] {
-		return fmt.Errorf("node at '%s' tried to send a message batch but we expect predecessor '%s'", sender, string(mix.ChainMatrix[mix.OwnChain][(mix.OwnIndex-1)].Addr))
+		return fmt.Errorf("node at '%s' tried to send a message batch but we expect predecessor '%s'", sender, mix.ChainMatrix[mix.OwnChain][(mix.OwnIndex-1)].Addr)
 	}
 
 	for {
 
+		// Decode message batch in packed format from stream.
 		batchProto, err := capnp.NewPackedDecoder(connWrite).Decode()
 		if err != nil {
 			return err
 		}
 
+		// Read batch from wire message.
 		batch, err := rpc.ReadRootBatch(batchProto)
 		if err != nil {
 			return err
