@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/gob"
 	"flag"
@@ -216,7 +217,6 @@ func main() {
 				}
 
 				sender := strings.Split(session.RemoteAddr().String(), ":")[0]
-				fmt.Printf("Sender: '%s'\n", sender)
 
 				// At entry mixes we only receive single
 				// conversation messages from clients.
@@ -240,7 +240,6 @@ func main() {
 			}
 
 			sender := strings.Split(session.RemoteAddr().String(), ":")[0]
-			fmt.Printf("Sender: '%s'\n", sender)
 
 			// At non-entry mixes we only expect to receive
 			// Cap'n Proto batch messages.
@@ -289,7 +288,9 @@ func main() {
 			}
 
 			// Display message.
-			fmt.Printf("RECEIVED: '%s'\n", msg)
+			if !bytes.Contains(msg, []byte("COVER MESSAGE PLEASE DISCARD")) {
+				fmt.Printf("RECEIVED: '%s'\n", msg)
+			}
 		}
 	}
 }

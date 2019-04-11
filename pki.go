@@ -199,8 +199,13 @@ func (node *Node) ConfigureChainMatrix(connRead *bufio.Reader, connWrite quic.St
 		return string(cands[i].Addr) < string(cands[j].Addr)
 	})
 
-	// TODO: Run VDF over candidates. Output is a
-	//       sequence of mixes of size c = s x l.
+	// We will mock the execution of a VDF here.
+	// In the future, this should obviously be replaced
+	// by an appropriate choice of an actual VDF, until
+	// then we simulate the execution environment by
+	// accepting a shared random string that will seed
+	// a PRNG from which each node determines the cascade
+	// mixes deterministically and offline.
 
 	if len(cands) != (NumCascades * LenCascade) {
 		return fmt.Errorf("received candidates set of unexpected length, saw: %d, expected: %d", len(cands), (NumCascades * LenCascade))

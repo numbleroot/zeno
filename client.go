@@ -198,8 +198,6 @@ func (cl *Client) OnionEncryptAndSend(text string, recipient string, chain int) 
 
 		if status != "0" {
 			time.Sleep((((RoundTime) / 2) + (50 * time.Millisecond)))
-		} else {
-			fmt.Printf("Successfully delivered message to entry mix '%s'.\n\n", cl.ChainMatrix[chain][0].Addr)
 		}
 	}
 
