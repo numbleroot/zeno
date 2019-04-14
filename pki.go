@@ -129,15 +129,18 @@ func (node *Node) GetAllClients() error {
 
 		// Add as new Endpoint to slice of clients.
 		node.Clients[i] = client
-
-		// Add index of new Endpoint under address to map.
-		node.ClientsByAddress[clientParts[0]] = i
 	}
 
 	// Sort clients deterministically.
 	sort.Slice(node.Clients, func(i, j int) bool {
 		return node.Clients[i].Addr < node.Clients[j].Addr
 	})
+
+	// Add index into slice for each client under
+	// its address to map.
+	for i := range node.Clients {
+		node.ClientsByAddress[node.Clients[i].Addr] = i
+	}
 
 	return nil
 }
