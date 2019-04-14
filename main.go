@@ -259,6 +259,11 @@ func main() {
 			SendWG: &sync.WaitGroup{},
 		}
 
+		// Use map to deduplicate incoming messages.
+		// We only forward messages to application layer
+		// that we have not already passed on before.
+		recvdMsgs := make(map[string]bool)
+
 		// Handle messaging loop.
 		go client.SendMsg()
 
@@ -287,9 +292,18 @@ func main() {
 				continue
 			}
 
-			// Display message.
-			if !bytes.Contains(msg, []byte("COVER MESSAGE PLEASE DISCARD")) {
-				fmt.Printf("RECEIVED: '%s'\n", msg)
+			// Do not consider cover traffic messages.
+			if !bytes.Equal(msg[0:28], []byte("COVER MESSAGE PLEASE DISCARD")) {
+
+				// Check dedup map for previous encounter.
+				_, seenBefore := recvdMsgs[string(msg[:23])]
+				if !seenBefore {
+
+					// Update message tracker.
+					recvdMsgs[string(msg[:23])] = true
+
+					fmt.Printf("> %s\n\n", msg[23:])
+				}
 			}
 		}
 	}
