@@ -197,7 +197,7 @@ func (cl *Client) OnionEncryptAndSend(text []byte, recipient string, chain int) 
 		status = strings.ToLower(strings.Trim(status, "\n "))
 
 		if status != "0" {
-			time.Sleep((((RoundTime) / 2) + (50 * time.Millisecond)))
+			time.Sleep((((RoundTime) / 3) + (10 * time.Millisecond)))
 		}
 	}
 
@@ -261,6 +261,18 @@ func (cl *Client) SendMsg() {
 
 		// In parallel, reverse onion-encrypt the
 		// message and send to all entry mixes.
+		for chain := range cl.ChainMatrix {
+			go cl.OnionEncryptAndSend(msg[:], partner, chain)
+		}
+
+		// Wait for all entry messages to be sent.
+		cl.SendWG.Wait()
+
+		cl.SendWG.Add(len(cl.ChainMatrix))
+
+		// In order to counter potential message loss
+		// in cascades, clients send each message again
+		// in the subsequent round.
 		for chain := range cl.ChainMatrix {
 			go cl.OnionEncryptAndSend(msg[:], partner, chain)
 		}

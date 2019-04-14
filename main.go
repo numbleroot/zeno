@@ -302,7 +302,8 @@ func main() {
 					// Update message tracker.
 					recvdMsgs[string(msg[:23])] = true
 
-					fmt.Printf("> %s\n\n", msg[23:])
+					// Finally, print received message.
+					fmt.Printf("\n@%s> %s\n", msg[17:22], msg[23:])
 				}
 			}
 		}

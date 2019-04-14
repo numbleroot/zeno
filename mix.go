@@ -376,8 +376,6 @@ func (mix *Mix) RotateRoundState() {
 
 		<-mix.RoundTicker.C
 
-		mix.printPools()
-
 		numClients := len(mix.Clients)
 		numSamples := numClients / 100
 		if numSamples < 100 {
