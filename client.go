@@ -68,10 +68,10 @@ func (cl *Client) InitNewRound() error {
 // A client uses this function to reverse-encrypt
 // a message for the assigned chain and send it off
 // to each respective entry mix.
-func (cl *Client) OnionEncryptAndSend(text string, recipient string, chain int) {
+func (cl *Client) OnionEncryptAndSend(text []byte, recipient string, chain int) {
 
 	// Pad message to fixed length.
-	msgPadded := new([280]byte)
+	msgPadded := new([360]byte)
 	copy(msgPadded[:], text)
 
 	// Create empty Cap'n Proto messsage.
@@ -212,34 +212,30 @@ func (cl *Client) OnionEncryptAndSend(text string, recipient string, chain int) 
 // traffic is encrypted and sent in its place.
 func (cl *Client) SendMsg() {
 
-	tests := []struct {
-		Msg       string
-		Recipient string
-	}{
-		{"Good morning, New York!", "127.0.0.1:11111"},
-		{"@$°%___!!!#### <- symbols much?", "127.0.0.1:11111"},
-		{"lorem ipsum dolor sit cannot be missing of course", "127.0.0.1:11111"},
-		{"TweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweetLengthTweet", "127.0.0.1:11111"},
-		{"All human beings are born free and equal in dignity and rights. They are endowed with reason and conscience and should act towards one another in a spirit of brotherhood. Everyone is entitled to all the rights and freedoms set forth in this Declaration, without distinction of any kind, such as race, colour, sex, language, religion, political or other opinion, national or social origin, property, birth or other status. Furthermore, no distinction shall be made on the basis of the political, jurisdictional or international status of the country or territory to which a person belongs, whether it be independent, trust, non-self-governing or under any other limitation of sovereignty.", "127.0.0.1:11111"},
-		{"abc", "127.0.0.1:11111"},
-		{"def", "127.0.0.1:11111"},
-		{"ghi", "127.0.0.1:11111"},
-		{"jkl", "127.0.0.1:11111"},
-		{"mno", "127.0.0.1:11111"},
-		{"pqr", "127.0.0.1:11111"},
-		{"stu", "127.0.0.1:11111"},
-		{"vwx", "127.0.0.1:11111"},
-		{"yz0", "127.0.0.1:11111"},
-		{"123", "127.0.0.1:11111"},
-		{"456", "127.0.0.1:11111"},
-		{"789", "127.0.0.1:11111"},
-		{"äöü", "127.0.0.1:11111"},
-		{"ßßß", "127.0.0.1:11111"},
-		{"*#_", "127.0.0.1:11111"},
-		{".:,", "127.0.0.1:11111"},
+	var partner string
+	var convoID string
+
+	for i := range cl.Clients {
+
+		if cl.Clients[i].Addr == cl.PubLisAddr {
+
+			// If own index is even, partnering client
+			// is the next one. If it is odd, the partner
+			// is the preceding client.
+			if (i % 2) == 0 {
+				partner = cl.Clients[(i + 1)].Addr
+				convoID = fmt.Sprintf("%06d => %06d;", i, (i + 1))
+			} else {
+				partner = cl.Clients[(i - 1)].Addr
+				convoID = fmt.Sprintf("%06d => %06d;", i, (i - 1))
+			}
+
+			fmt.Printf("%s's partner is %s, convoID: '%s'\n", cl.Clients[i].Addr, partner, convoID)
+		}
 	}
 
-	for t := range tests {
+	var msgID uint16
+	for msgID = 0; msgID <= 65535; msgID++ {
 
 		// Prepare the needed new round state,
 		// primarily including fresh key material.
@@ -249,12 +245,24 @@ func (cl *Client) SendMsg() {
 			os.Exit(1)
 		}
 
+		// Prepare message to send.
+		msg := new([360]byte)
+
+		// First 17 bytes will be conversation ID.
+		copy(msg[:], convoID)
+
+		// Bytes 18 - 23 are the message sequence number.
+		copy(msg[17:], fmt.Sprintf("%05d;", msgID))
+
+		// Bytes 24 - 360 are the actual message.
+		copy(msg[23:], Msg)
+
 		cl.SendWG.Add(len(cl.ChainMatrix))
 
 		// In parallel, reverse onion-encrypt the
 		// message and send to all entry mixes.
 		for chain := range cl.ChainMatrix {
-			go cl.OnionEncryptAndSend(tests[t].Msg, tests[t].Recipient, chain)
+			go cl.OnionEncryptAndSend(msg[:], partner, chain)
 		}
 
 		// Wait for all entry messages to be sent.

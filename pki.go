@@ -89,52 +89,55 @@ func (node *Node) GetAllClients() error {
 	clients := strings.Split(strings.ToLower(strings.Trim(clientsRaw, "\n ")), ";")
 
 	// Prepare internal state tracking objects.
-	node.KnownClients = make(map[string]*Endpoint)
-	node.ChooseClients = make([]string, 0, len(clients))
+	node.Clients = make([]*Endpoint, len(clients))
+	node.ClientsByAddress = make(map[string]int)
 
 	for i := range clients {
 
-		client := strings.Split(clients[i], ",")
+		clientParts := strings.Split(clients[i], ",")
 
-		if node.PubLisAddr != client[0] {
-
-			// Parse contained public key in hex
-			// representation to byte slice.
-			pubKey := new([32]byte)
-			pubKeyRaw, err := hex.DecodeString(client[1])
-			if err != nil {
-				return err
-			}
-			copy(pubKey[:], pubKeyRaw)
-
-			// Parse contained TLS certificate in
-			// hex representation to byte slice.
-			pubCertPEM, err := hex.DecodeString(client[2])
-			if err != nil {
-				return err
-			}
-
-			// Create new empty cert pool.
-			certPool := x509.NewCertPool()
-
-			// Attempt to add received certificate to pool.
-			ok := certPool.AppendCertsFromPEM(pubCertPEM)
-			if !ok {
-				return fmt.Errorf("failed to add received client's certificate to empty pool")
-			}
-
-			// Append as new Endpoint to map.
-			node.KnownClients[client[0]] = &Endpoint{
-				Addr:        client[0],
-				PubKey:      pubKey,
-				PubCertPool: certPool,
-			}
-
-			// Also append only the adress to
-			// clients slice for cover traffic.
-			node.ChooseClients = append(node.ChooseClients, client[0])
+		// Parse contained public key in hex
+		// representation to byte slice.
+		pubKey := new([32]byte)
+		pubKeyRaw, err := hex.DecodeString(clientParts[1])
+		if err != nil {
+			return err
 		}
+		copy(pubKey[:], pubKeyRaw)
+
+		// Parse contained TLS certificate in
+		// hex representation to byte slice.
+		pubCertPEM, err := hex.DecodeString(clientParts[2])
+		if err != nil {
+			return err
+		}
+
+		// Create new empty cert pool.
+		certPool := x509.NewCertPool()
+
+		// Attempt to add received certificate to pool.
+		ok := certPool.AppendCertsFromPEM(pubCertPEM)
+		if !ok {
+			return fmt.Errorf("failed to add received client's certificate to empty pool")
+		}
+
+		client := &Endpoint{
+			Addr:        clientParts[0],
+			PubKey:      pubKey,
+			PubCertPool: certPool,
+		}
+
+		// Add as new Endpoint to slice of clients.
+		node.Clients[i] = client
+
+		// Add index of new Endpoint under address to map.
+		node.ClientsByAddress[clientParts[0]] = i
 	}
+
+	// Sort clients deterministically.
+	sort.Slice(node.Clients, func(i, j int) bool {
+		return node.Clients[i].Addr < node.Clients[j].Addr
+	})
 
 	return nil
 }
@@ -196,7 +199,7 @@ func (node *Node) ConfigureChainMatrix(connRead *bufio.Reader, connWrite quic.St
 
 	// Sort candidates deterministically.
 	sort.Slice(cands, func(i, j int) bool {
-		return string(cands[i].Addr) < string(cands[j].Addr)
+		return cands[i].Addr < cands[j].Addr
 	})
 
 	// We will mock the execution of a VDF here.

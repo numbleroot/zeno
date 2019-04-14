@@ -55,8 +55,8 @@ type Node struct {
 	PKIListener           quic.Listener
 	ChainMatrixConfigured chan struct{}
 	ChainMatrix           [][]*Endpoint
-	KnownClients          map[string]*Endpoint
-	ChooseClients         []string
+	Clients               []*Endpoint
+	ClientsByAddress      map[string]int
 }
 
 // Client represents a client node in

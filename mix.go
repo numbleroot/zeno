@@ -109,7 +109,7 @@ func (mix *Mix) AddCoverMsgsToPool(initFirst bool, numClients int, numSamples in
 		// Prepare cover message.
 		// TODO: Think hard about fill-up with random bytes again.
 		//       Any attacker advantage if we only use zeros to fill up?
-		msgPadded := new([280]byte)
+		msgPadded := new([360]byte)
 		copy(msgPadded[:], "COVER MESSAGE PLEASE DISCARD")
 
 		// Create empty Cap'n Proto messsage.
@@ -123,7 +123,7 @@ func (mix *Mix) AddCoverMsgsToPool(initFirst bool, numClients int, numSamples in
 		if err != nil {
 			return err
 		}
-		convoExitMsg.SetPubKeyOrAddr([]byte(mix.KnownClients[mix.ChooseClients[chosen]].Addr))
+		convoExitMsg.SetPubKeyOrAddr([]byte(mix.Clients[chosen].Addr))
 		convoExitMsg.SetContent(msgPadded[:])
 
 		if mix.IsExit {
@@ -264,7 +264,7 @@ func (mix *Mix) AddCoverMsgsToPool(initFirst bool, numClients int, numSamples in
 // for incoming messages.
 func (mix *Mix) InitNewRound() error {
 
-	numClients := len(mix.KnownClients)
+	numClients := len(mix.Clients)
 	numSamples := numClients / 100
 	if numSamples < 100 {
 		numSamples = numClients
@@ -319,11 +319,12 @@ func (mix *Mix) SendOutMsg(msgChan chan *rpc.ConvoMsg) {
 		}
 
 		// Find local endpoint mapped to address.
-		client, found := mix.KnownClients[string(addr)]
+		clIdx, found := mix.ClientsByAddress[string(addr)]
 		if !found {
 			fmt.Printf("Client to contact not known (no TLS certificate available).\n")
 			continue
 		}
+		client := mix.Clients[clIdx]
 
 		// Extract message to send.
 		msg, err := exitMsg.Content()
@@ -340,7 +341,7 @@ func (mix *Mix) SendOutMsg(msgChan chan *rpc.ConvoMsg) {
 			CurvePreferences:   []tls.CurveID{tls.X25519},
 		}, nil)
 		if err != nil {
-			fmt.Printf("Could not connect to client via QUIC: %v\n", err)
+			fmt.Printf("Could not connect to client %s via QUIC: %v\n", string(addr), err)
 			continue
 		}
 
@@ -377,7 +378,7 @@ func (mix *Mix) RotateRoundState() {
 
 		mix.printPools()
 
-		numClients := len(mix.KnownClients)
+		numClients := len(mix.Clients)
 		numSamples := numClients / 100
 		if numSamples < 100 {
 			numSamples = numClients
