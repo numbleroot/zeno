@@ -219,6 +219,8 @@ func (cl *Client) SendMsg() {
 
 		if cl.Clients[i].Addr == cl.PubLisAddr {
 
+			fmt.Printf("This node's client index: %d\n", i)
+
 			// If own index is even, partnering client
 			// is the next one. If it is odd, the partner
 			// is the preceding client.

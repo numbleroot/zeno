@@ -3,13 +3,17 @@ package main
 import (
 	"bufio"
 	"crypto/x509"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"math/rand"
 	"os"
 	"sort"
 	"strings"
 
 	"github.com/lucas-clemente/quic-go"
+	"golang.org/x/crypto/scrypt"
+	"golang.org/x/crypto/sha3"
 )
 
 // Enable TLS 1.3.
@@ -200,6 +204,12 @@ func (node *Node) ConfigureChainMatrix(connRead *bufio.Reader, connWrite quic.St
 		}
 	}
 
+	// Enforce the minimum number of mix
+	// candidates to be present.
+	if len(cands) < (NumCascades * LenCascade) {
+		return fmt.Errorf("received candidates set of unexpected length, saw: %d, expected: %d", len(cands), (NumCascades * LenCascade))
+	}
+
 	// Sort candidates deterministically.
 	sort.Slice(cands, func(i, j int) bool {
 		return cands[i].Addr < cands[j].Addr
@@ -213,23 +223,86 @@ func (node *Node) ConfigureChainMatrix(connRead *bufio.Reader, connWrite quic.St
 	// a PRNG from which each node determines the cascade
 	// mixes deterministically and offline.
 
-	if len(cands) != (NumCascades * LenCascade) {
-		return fmt.Errorf("received candidates set of unexpected length, saw: %d, expected: %d", len(cands), (NumCascades * LenCascade))
+	// Cycle through candidates and incorporate
+	// all public keys into the state for the
+	// SHAKE256 hash.
+	hash := sha3.NewShake256()
+	for i := range cands {
+
+		_, err := hash.Write(cands[i].PubKey[:])
+		if err != nil {
+			return fmt.Errorf("failed adding candidate's public key to SHAKE hash: %v", err)
+		}
 	}
 
+	// Create resulting hash of 64 bytes.
+	candsPass := make([]byte, 64)
+	hash.Read(candsPass)
+
+	// Use hash as password to password generation
+	// function scrypt with empty salt. Read 8 bytes
+	// output secret.
+	scryptPass, err := scrypt.Key(candsPass, nil, 131072, 8, 2, 8)
+	if err != nil {
+		return fmt.Errorf("scrypt operation for PRNG seed failed: %v", err)
+	}
+
+	// Interpret 8 byte scrypt secret as unsigned
+	// 64 bit integer which we will use as the
+	// seed to math.Rand.
+	seed := binary.LittleEndian.Uint64(scryptPass)
+
+	// Seed math.Rand with created seed.
+	prng := rand.New(rand.NewSource(int64(seed)))
+
+	// Prepare appropriately sized chain matrix.
 	node.ChainMatrix = make([][]*Endpoint, NumCascades)
+
+	// Prepare auxiliary map to track drawn values.
+	drawnValues := make(map[int]bool)
 
 	for c := 0; c < NumCascades; c++ {
 
 		chain := make([]*Endpoint, LenCascade)
 
-		// Extract next-up candidate from list.
 		for m := 0; m < LenCascade; m++ {
-			chain[m] = cands[((c * LenCascade) + m)]
+
+			// Draw pseudo-random number representing
+			// index in candidates set to fill position.
+			idx := prng.Intn(len(cands))
+
+			// As long as we draw numbers that we have
+			// used before, continue drawing.
+			_, drawn := drawnValues[idx]
+			for drawn {
+				idx = prng.Intn(len(cands))
+				_, drawn = drawnValues[idx]
+			}
+
+			// Add fresh mix to current chain.
+			chain[m] = cands[idx]
+
+			// Mark index as drawn.
+			drawnValues[idx] = true
 		}
 
 		// Integrate new chain into matrix.
 		node.ChainMatrix[c] = chain
+	}
+
+	fmt.Printf("Final matrix:\n")
+	for i := range node.ChainMatrix {
+
+		fmt.Printf("\tCASC %d: ", i)
+		for j := range node.ChainMatrix[i] {
+
+			if j == (len(node.ChainMatrix[i]) - 1) {
+				fmt.Printf("%s", node.ChainMatrix[i][j].Addr)
+			} else {
+				fmt.Printf("%s => ", node.ChainMatrix[i][j].Addr)
+			}
+		}
+		fmt.Printf("\n")
 	}
 
 	// Signal channel node.ChainMatrixConfigured.

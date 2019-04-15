@@ -27,7 +27,7 @@ const BatchSizeVariance = 5
 // NumCascades defines the number of
 // distinct cascades that make up the
 // chain matrix.
-const NumCascades = 2
+const NumCascades = 1
 
 // LenCascade defines the number of mixes
 // required to form one mix cascade.

@@ -144,11 +144,26 @@ func main() {
 
 	if isMix {
 
-		// TODO: Figure out whether the mix intent of this
-		//       node resulted in it getting elected.
-		elected = true
+		// Figure out whether the mix intent of this
+		// node resulted in it getting elected.
+		for chain := range node.ChainMatrix {
+
+			for m := range node.ChainMatrix[chain] {
+
+				if bytes.Equal(node.ChainMatrix[chain][m].PubKey[:], node.RecvPubKey[:]) {
+					elected = true
+					break
+				}
+			}
+
+			if elected {
+				break
+			}
+		}
 
 		if !elected {
+
+			fmt.Printf("Node %s wanted to be a mix, but was not elected.\n", node.PubLisAddr)
 
 			// This node intended to become a mix yet did
 			// not get elected. Register as regular client.
@@ -157,6 +172,8 @@ func main() {
 				fmt.Printf("Failed to late-register as client at PKI server: %v\n", err)
 				os.Exit(1)
 			}
+		} else {
+			fmt.Printf("Node %s has been elected to be a mix.\n", node.PubLisAddr)
 		}
 	}
 
