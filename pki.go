@@ -39,6 +39,8 @@ func (node *Node) RegisterAtPKI(category string) error {
 			return err
 		}
 
+		fmt.Printf("\nConnected to PKI at %s.\n", node.PKIAddr)
+
 		// Upgrade session to blocking stream.
 		connWrite, err := session.OpenStreamSync()
 		if err != nil {
@@ -60,17 +62,15 @@ func (node *Node) RegisterAtPKI(category string) error {
 
 		// Verify cleaned response.
 		resp = strings.ToLower(strings.Trim(resp, "\n "))
-		if resp == "1" {
-
-			// Permanent failure, leave with error.
-			return fmt.Errorf("PKI returned failure response to mix intent registration: %s", resp)
-
-		} else if resp == "2" {
+		if resp == "2" {
 
 			// Wrong phase in epoch protocol.
 			// Wait a bit and try again.
-			fmt.Printf("Registration for %s at PKI was inconvenient. Waiting %v and trying again...\n", category, (5 * EpochBrick))
-			time.Sleep(5 * EpochBrick)
+			fmt.Printf("Registration for %s at PKI was inconvenient. Waiting %v and trying again...\n", category, (1 * time.Second))
+			time.Sleep(1 * time.Second)
+
+		} else if resp != "0" {
+			return fmt.Errorf("PKI returned failure response to mix intent registration: %s", resp)
 		}
 	}
 
@@ -83,7 +83,7 @@ func (node *Node) RegisterAtPKI(category string) error {
 // shared cascades matrix at the end.
 func (node *Node) ElectMixes(data []string) error {
 
-	mockVDFTicker := time.NewTicker(5 * EpochBrick)
+	mockVDFTicker := time.NewTicker(1 * EpochBrick)
 
 	// Parse list of addresses and public keys
 	// received from PKI into candidates slice.
@@ -351,6 +351,8 @@ func (node *Node) HandleMsgFromPKI(connRead *bufio.Reader, connWrite quic.Stream
 // and acting upon messages from the PKI.
 func (node *Node) AcceptMsgsFromPKI() {
 
+	fmt.Printf("Waiting for PKI messages...\n")
+
 	for {
 
 		// Wait for incoming connections from PKI.
@@ -401,6 +403,8 @@ func (node *Node) PrepareNextEpoch(isMix bool, isClient bool) (bool, error) {
 		}
 	}
 
+	fmt.Printf("\nRegistered at PKI, waiting for mix election to finish\n")
+
 	// Wait for signal that the cascades matrix
 	// has been computed.
 	<-node.SigMixesElected
@@ -442,9 +446,13 @@ func (node *Node) PrepareNextEpoch(isMix bool, isClient bool) (bool, error) {
 		}
 	}
 
+	fmt.Printf("\nMixes determined, waiting for clients to be broadcast\n")
+
 	// Wait for signal that set of clients for
 	// upcoming epoch has been received and parsed.
 	<-node.SigClientsAdded
+
+	fmt.Printf("\nShall the regular rounds begin!\n")
 
 	return elected, nil
 }

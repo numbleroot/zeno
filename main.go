@@ -119,6 +119,9 @@ func main() {
 		os.Exit(1)
 	}
 
+	// TODO: Listeners and connections need to be
+	//       shut down and closed way more explicitely.
+
 	for {
 
 		// Swap elected mixes and registered clients

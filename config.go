@@ -23,7 +23,7 @@ const NumCascades = 1
 
 // LenCascade defines the number of mixes
 // required to form one mix cascade.
-const LenCascade = 3
+const LenCascade = 4
 
 // Msg is the conversation message that
 // is sent between participants of the
