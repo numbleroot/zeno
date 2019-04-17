@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/x509"
 	"encoding/binary"
 	"encoding/hex"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/lucas-clemente/quic-go"
 	"golang.org/x/crypto/scrypt"
@@ -27,150 +29,69 @@ func init() {
 // connection information via TLS to the PKI server.
 func (node *Node) RegisterAtPKI(category string) error {
 
-	// Connect to PKI TLS endpoint.
-	session, err := quic.DialAddr(node.PKIAddr, node.PKITLSConfAsClient, nil)
-	if err != nil {
-		return err
-	}
+	var resp string
 
-	// Upgrade session to blocking stream.
-	connWrite, err := session.OpenStreamSync()
-	if err != nil {
-		return err
-	}
+	for resp != "0" {
 
-	// Create buffered I/O reader from connection.
-	connRead := bufio.NewReader(connWrite)
+		// Connect to PKI TLS endpoint.
+		session, err := quic.DialAddr(node.PKIAddr, node.PKITLSConfAsClient, nil)
+		if err != nil {
+			return err
+		}
 
-	// Register this node's intent on participating
-	// as a mix node with the PKI.
-	fmt.Fprintf(connWrite, "post %s %s %s %x %x\n", category, node.PubLisAddr, node.PKILisAddr, *node.RecvPubKey, node.PubCertPEM)
+		// Upgrade session to blocking stream.
+		connWrite, err := session.OpenStreamSync()
+		if err != nil {
+			return err
+		}
 
-	// Expect an acknowledgement.
-	resp, err := connRead.ReadString('\n')
-	if err != nil {
-		return err
-	}
+		// Create buffered I/O reader from connection.
+		connRead := bufio.NewReader(connWrite)
 
-	// Verify cleaned response.
-	resp = strings.ToLower(strings.Trim(resp, "\n "))
-	if resp != "0" {
-		return fmt.Errorf("PKI returned failure response to mix intent registration: %s", resp)
+		// Register this node's intent on participating
+		// in a particular role with the PKI.
+		fmt.Fprintf(connWrite, "%s %s %s %x %x\n", category, node.PubLisAddr, node.PKILisAddr, *node.RecvPubKey, node.PubCertPEM)
+
+		// Expect an acknowledgement.
+		resp, err = connRead.ReadString('\n')
+		if err != nil {
+			return err
+		}
+
+		// Verify cleaned response.
+		resp = strings.ToLower(strings.Trim(resp, "\n "))
+		if resp == "1" {
+
+			// Permanent failure, leave with error.
+			return fmt.Errorf("PKI returned failure response to mix intent registration: %s", resp)
+
+		} else if resp == "2" {
+
+			// Wrong phase in epoch protocol.
+			// Wait a bit and try again.
+			fmt.Printf("Registration for %s at PKI was inconvenient. Waiting %v and trying again...\n", category, (5 * EpochBrick))
+			time.Sleep(5 * EpochBrick)
+		}
 	}
 
 	return nil
 }
 
-// GetAllClients retrieves the set of client
-// mappings registered at the PKI.
-func (node *Node) GetAllClients() error {
+// ElectMixes accepts the slice of strings
+// carrying mix candidates and performs all
+// the necessary steps to end up with the
+// shared cascades matrix at the end.
+func (node *Node) ElectMixes(data []string) error {
 
-	// Connect to PKI TLS endpoint.
-	session, err := quic.DialAddr(node.PKIAddr, node.PKITLSConfAsClient, nil)
-	if err != nil {
-		return err
-	}
-
-	// Upgrade session to blocking stream.
-	connWrite, err := session.OpenStreamSync()
-	if err != nil {
-		return err
-	}
-
-	// Create buffered I/O reader from connection.
-	connRead := bufio.NewReader(connWrite)
-
-	// Query for a string containing all clients.
-	fmt.Fprintf(connWrite, "getall clients\n")
-
-	// Expect a rather long response string.
-	clientsRaw, err := connRead.ReadString('\n')
-	if err != nil {
-		return err
-	}
-
-	// Parse string into slice of Endpoint.
-	clients := strings.Split(strings.ToLower(strings.Trim(clientsRaw, "\n ")), ";")
-
-	// Prepare internal state tracking objects.
-	node.Clients = make([]*Endpoint, len(clients))
-	node.ClientsByAddress = make(map[string]int)
-
-	for i := range clients {
-
-		clientParts := strings.Split(clients[i], ",")
-
-		// Parse contained public key in hex
-		// representation to byte slice.
-		pubKey := new([32]byte)
-		pubKeyRaw, err := hex.DecodeString(clientParts[1])
-		if err != nil {
-			return err
-		}
-		copy(pubKey[:], pubKeyRaw)
-
-		// Parse contained TLS certificate in
-		// hex representation to byte slice.
-		pubCertPEM, err := hex.DecodeString(clientParts[2])
-		if err != nil {
-			return err
-		}
-
-		// Create new empty cert pool.
-		certPool := x509.NewCertPool()
-
-		// Attempt to add received certificate to pool.
-		ok := certPool.AppendCertsFromPEM(pubCertPEM)
-		if !ok {
-			return fmt.Errorf("failed to add received client's certificate to empty pool")
-		}
-
-		client := &Endpoint{
-			Addr:        clientParts[0],
-			PubKey:      pubKey,
-			PubCertPool: certPool,
-		}
-
-		// Add as new Endpoint to slice of clients.
-		node.Clients[i] = client
-	}
-
-	// Sort clients deterministically.
-	sort.Slice(node.Clients, func(i, j int) bool {
-		return node.Clients[i].Addr < node.Clients[j].Addr
-	})
-
-	// Add index into slice for each client under
-	// its address to map.
-	for i := range node.Clients {
-		node.ClientsByAddress[node.Clients[i].Addr] = i
-	}
-
-	return nil
-}
-
-// ConfigureChainMatrix parses the received
-// set of cascade candidates and executes
-// the deterministic cascades election that
-// are captured in chain matrix afterwards.
-func (node *Node) ConfigureChainMatrix(connRead *bufio.Reader, connWrite quic.Stream) error {
-
-	// Receive candidates string from PKI.
-	candsMsg, err := connRead.ReadString('\n')
-	if err != nil {
-		return err
-	}
-
-	fmt.Printf("Candidates broadcast received!\n")
+	mockVDFTicker := time.NewTicker(5 * EpochBrick)
 
 	// Parse list of addresses and public keys
 	// received from PKI into candidates slice.
-	candsLines := strings.Split(strings.ToLower(strings.Trim(candsMsg, "\n ")), ";")
-	cands := make([]*Endpoint, len(candsLines))
+	cands := make([]*Endpoint, len(data))
 
-	for i := range candsLines {
+	for i := range data {
 
-		candsParts := strings.Split(candsLines[i], ",")
+		candsParts := strings.Split(data[i], ",")
 
 		// Parse contained public key in hex
 		// representation to byte slice.
@@ -218,14 +139,10 @@ func (node *Node) ConfigureChainMatrix(connRead *bufio.Reader, connWrite quic.St
 	// We will mock the execution of a VDF here.
 	// In the future, this should obviously be replaced
 	// by an appropriate choice of an actual VDF, until
-	// then we simulate the execution environment by
-	// accepting a shared random string that will seed
-	// a PRNG from which each node determines the cascade
-	// mixes deterministically and offline.
+	// then we simulate the execution environment.
 
-	// Cycle through candidates and incorporate
-	// all public keys into the state for the
-	// SHAKE256 hash.
+	// Cycle through candidates and incorporate all
+	// public keys into the state for the SHAKE256 hash.
 	hash := sha3.NewShake256()
 	for i := range cands {
 
@@ -255,8 +172,8 @@ func (node *Node) ConfigureChainMatrix(connRead *bufio.Reader, connWrite quic.St
 	// Seed math.Rand with created seed.
 	prng := rand.New(rand.NewSource(int64(seed)))
 
-	// Prepare appropriately sized chain matrix.
-	node.ChainMatrix = make([][]*Endpoint, NumCascades)
+	// Prepare appropriately sized cascades matrix.
+	node.NextCascadesMatrix = make([][]*Endpoint, NumCascades)
 
 	// Prepare auxiliary map to track drawn values.
 	drawnValues := make(map[int]bool)
@@ -287,34 +204,152 @@ func (node *Node) ConfigureChainMatrix(connRead *bufio.Reader, connWrite quic.St
 		}
 
 		// Integrate new chain into matrix.
-		node.ChainMatrix[c] = chain
+		node.NextCascadesMatrix[c] = chain
 	}
 
-	fmt.Printf("Final matrix:\n")
-	for i := range node.ChainMatrix {
+	fmt.Printf("Upcoming cascades matrix:\n")
+	for i := range node.NextCascadesMatrix {
 
 		fmt.Printf("\tCASC %d: ", i)
-		for j := range node.ChainMatrix[i] {
+		for j := range node.NextCascadesMatrix[i] {
 
-			if j == (len(node.ChainMatrix[i]) - 1) {
-				fmt.Printf("%s", node.ChainMatrix[i][j].Addr)
+			if j == (len(node.NextCascadesMatrix[i]) - 1) {
+				fmt.Printf("%s", node.NextCascadesMatrix[i][j].Addr)
 			} else {
-				fmt.Printf("%s => ", node.ChainMatrix[i][j].Addr)
+				fmt.Printf("%s => ", node.NextCascadesMatrix[i][j].Addr)
 			}
 		}
 		fmt.Printf("\n")
 	}
 
-	// Signal channel node.ChainMatrixConfigured.
-	node.ChainMatrixConfigured <- struct{}{}
+	// Wait for ticker signal for proper
+	// mocking of a VDF execution.
+	<-mockVDFTicker.C
 
 	return nil
 }
 
-// HandlePKIMsgs runs in a loop waiting for
-// incoming messages from the PKI. Usually,
-// they will contain cascade candidates.
-func (node *Node) HandlePKIMsgs() {
+// ParseClients parses the received set
+// of clients and incorporates them in
+// the correct places in local structures.
+func (node *Node) ParseClients(data []string) error {
+
+	// Prepare state structure.
+	clients := make([]*Endpoint, len(data))
+
+	for i := range data {
+
+		clientParts := strings.Split(data[i], ",")
+
+		// Parse contained public key in hex
+		// representation to byte slice.
+		pubKey := new([32]byte)
+		pubKeyRaw, err := hex.DecodeString(clientParts[1])
+		if err != nil {
+			return err
+		}
+		copy(pubKey[:], pubKeyRaw)
+
+		// Parse contained TLS certificate in
+		// hex representation to byte slice.
+		pubCertPEM, err := hex.DecodeString(clientParts[2])
+		if err != nil {
+			return err
+		}
+
+		// Create new empty cert pool.
+		certPool := x509.NewCertPool()
+
+		// Attempt to add received certificate to pool.
+		ok := certPool.AppendCertsFromPEM(pubCertPEM)
+		if !ok {
+			return fmt.Errorf("failed to add received client's certificate to empty pool")
+		}
+
+		// Add as new Endpoint to slice of clients.
+		clients[i] = &Endpoint{
+			Addr:        clientParts[0],
+			PubKey:      pubKey,
+			PubCertPool: certPool,
+		}
+	}
+
+	// Sort clients deterministically.
+	sort.Slice(clients, func(i, j int) bool {
+		return clients[i].Addr < clients[j].Addr
+	})
+
+	// Set internal clients structure to created one.
+	node.NextClients = clients
+	node.NextClientsByAddress = make(map[string]int)
+
+	// Add index into slice for each client under
+	// its address to map.
+	for i := range node.NextClients {
+		node.NextClientsByAddress[node.NextClients[i].Addr] = i
+	}
+
+	return nil
+}
+
+// HandleMsgFromPKI parses the received message
+// from the PKI and takes appropriate steps
+// after having parsed it.
+func (node *Node) HandleMsgFromPKI(connRead *bufio.Reader, connWrite quic.Stream) {
+
+	// Receive data as string from PKI.
+	dataRaw, err := connRead.ReadString('\n')
+	if err != nil {
+		fmt.Printf("Error receiving data from PKI: %v\n", err)
+		return
+	}
+
+	// Split raw data at semicola. First line
+	// determines which type of data this
+	// broadcast carries.
+	data := strings.Split(strings.ToLower(strings.Trim(dataRaw, "\n ")), ";")
+
+	switch data[0] {
+	case "mixes":
+
+		fmt.Printf("PKI mix candidates broadcast received!\n")
+
+		// Determine mix nodes based on received data.
+		err = node.ElectMixes(data[1:])
+		if err != nil {
+			fmt.Printf("Cascades election failed: %v\n", err)
+			return
+		}
+
+		// Signal completion to main routine.
+		node.SigMixesElected <- struct{}{}
+
+	case "clients":
+
+		fmt.Printf("PKI clients broadcast received!\n")
+
+		// Parse set of clients and store internally.
+		err = node.ParseClients(data[1:])
+		if err != nil {
+			fmt.Printf("Parsing received set of clients failed: %v\n", err)
+			return
+		}
+
+		// Signal completion to main routine.
+		node.SigClientsAdded <- struct{}{}
+
+	case "epoch":
+
+		fmt.Printf("PKI epoch rotation signal received!\n")
+
+		// Signal epoch rotation to main routine.
+		node.SigRotateEpoch <- struct{}{}
+	}
+}
+
+// AcceptMsgsFromPKI runs in a loop waiting for
+// and acting upon messages from the PKI.
+func (node *Node) AcceptMsgsFromPKI() {
 
 	for {
 
@@ -335,6 +370,81 @@ func (node *Node) HandlePKIMsgs() {
 		// Create buffered I/O reader from connection.
 		connRead := bufio.NewReader(connWrite)
 
-		go node.ConfigureChainMatrix(connRead, connWrite)
+		go node.HandleMsgFromPKI(connRead, connWrite)
 	}
+}
+
+// PrepareNextEpoch takes care of registering
+// a node under the intended role with the PKI,
+// waits for signals of the PKI on sent data
+// such as mix candidates and clients, and acts
+// upon those data sets.
+func (node *Node) PrepareNextEpoch(isMix bool, isClient bool) (bool, error) {
+
+	if isMix {
+
+		// Nodes that offer to take up a mix role
+		// register their intent with the PKI.
+		err := node.RegisterAtPKI("mixes")
+		if err != nil {
+			return false, fmt.Errorf("failed to register mix intent: %v", err)
+		}
+
+	} else if isClient {
+
+		// Nodes that are regular clients in the
+		// system register with their address and
+		// receive public key at the PKI.
+		err := node.RegisterAtPKI("clients")
+		if err != nil {
+			return false, fmt.Errorf("failed to register as client: %v", err)
+		}
+	}
+
+	// Wait for signal that the cascades matrix
+	// has been computed.
+	<-node.SigMixesElected
+
+	elected := false
+
+	if isMix {
+
+		// Figure out whether the mix intent of this
+		// node resulted in it getting elected.
+		for chain := range node.NextCascadesMatrix {
+
+			for m := range node.NextCascadesMatrix[chain] {
+
+				if bytes.Equal(node.NextCascadesMatrix[chain][m].PubKey[:], node.RecvPubKey[:]) {
+					elected = true
+					break
+				}
+			}
+
+			if elected {
+				break
+			}
+		}
+
+		if !elected {
+
+			fmt.Printf("Node %s wanted to be a mix, but was not elected.\n", node.PubLisAddr)
+
+			// This node intended to become a mix yet did
+			// not get elected. Register as regular client.
+			err := node.RegisterAtPKI("clients")
+			if err != nil {
+				return elected, fmt.Errorf("failed to late-register as client: %v", err)
+			}
+
+		} else {
+			fmt.Printf("Node %s has been elected to be a mix.\n", node.PubLisAddr)
+		}
+	}
+
+	// Wait for signal that set of clients for
+	// upcoming epoch has been received and parsed.
+	<-node.SigClientsAdded
+
+	return elected, nil
 }

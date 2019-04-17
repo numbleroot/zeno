@@ -20,26 +20,26 @@ import (
 )
 
 // SetOwnPlace sets important indices into
-// chain matrix for a just elected mix.
+// cascades matrix for a just elected mix.
 func (mix *Mix) SetOwnPlace() {
 
 	breakHere := false
 
-	for chain := range mix.ChainMatrix {
+	for chain := range mix.CurCascadesMatrix {
 
-		for m := range mix.ChainMatrix[chain] {
+		for m := range mix.CurCascadesMatrix[chain] {
 
-			if bytes.Equal(mix.ChainMatrix[chain][m].PubKey[:], mix.RecvPubKey[:]) {
+			if bytes.Equal(mix.CurCascadesMatrix[chain][m].PubKey[:], mix.RecvPubKey[:]) {
 
 				// If we found this mix' place in the
-				// chain matrix, set values and signal
+				// cascades matrix, set values and signal
 				// to break from loops.
 				mix.OwnChain = chain
 				mix.OwnIndex = m
 
 				if m == 0 {
 					mix.IsEntry = true
-				} else if m == (len(mix.ChainMatrix[chain]) - 1) {
+				} else if m == (len(mix.CurCascadesMatrix[chain]) - 1) {
 					mix.IsExit = true
 				}
 
@@ -61,8 +61,8 @@ func (mix *Mix) ReconnectToSuccessor() error {
 	if !mix.IsExit {
 
 		// Dial successor mix via TLS-over-QUIC.
-		session, err := quic.DialAddr(mix.ChainMatrix[mix.OwnChain][(mix.OwnIndex+1)].Addr, &tls.Config{
-			RootCAs:            mix.ChainMatrix[mix.OwnChain][(mix.OwnIndex + 1)].PubCertPool,
+		session, err := quic.DialAddr(mix.CurCascadesMatrix[mix.OwnChain][(mix.OwnIndex+1)].Addr, &tls.Config{
+			RootCAs:            mix.CurCascadesMatrix[mix.OwnChain][(mix.OwnIndex + 1)].PubCertPool,
 			InsecureSkipVerify: false,
 			MinVersion:         tls.VersionTLS13,
 			CurvePreferences:   []tls.CurveID{tls.X25519},
@@ -93,7 +93,7 @@ func (mix *Mix) ReconnectToSuccessor() error {
 func (mix *Mix) AddCoverMsgsToPool(initFirst bool, numClients int, numSamples int) error {
 
 	// Number of mixes in own cascade until exit.
-	numMixesToEnd := len(mix.ChainMatrix[mix.OwnChain]) - (mix.OwnIndex + 1)
+	numMixesToEnd := len(mix.CurCascadesMatrix[mix.OwnChain]) - (mix.OwnIndex + 1)
 
 	// Randomly select k clients to generate
 	// cover messages to.
@@ -123,7 +123,7 @@ func (mix *Mix) AddCoverMsgsToPool(initFirst bool, numClients int, numSamples in
 		if err != nil {
 			return err
 		}
-		convoExitMsg.SetPubKeyOrAddr([]byte(mix.Clients[chosen].Addr))
+		convoExitMsg.SetPubKeyOrAddr([]byte(mix.CurClients[chosen].Addr))
 		convoExitMsg.SetContent(msgPadded[:])
 
 		if mix.IsExit {
@@ -176,7 +176,7 @@ func (mix *Mix) AddCoverMsgsToPool(initFirst bool, numClients int, numSamples in
 
 				// Calculate shared key between ephemeral
 				// secret key and receive public key of each mix.
-				box.Precompute(keys[otherMix].SymKey, mix.ChainMatrix[mix.OwnChain][origIdx].PubKey, msgSecKey)
+				box.Precompute(keys[otherMix].SymKey, mix.CurCascadesMatrix[mix.OwnChain][origIdx].PubKey, msgSecKey)
 			}
 
 			// Marshal final ConvoExitMsg to byte slice.
@@ -264,7 +264,7 @@ func (mix *Mix) AddCoverMsgsToPool(initFirst bool, numClients int, numSamples in
 // for incoming messages.
 func (mix *Mix) InitNewRound() error {
 
-	numClients := len(mix.Clients)
+	numClients := len(mix.CurClients)
 	numSamples := numClients / 100
 	if numSamples < 100 {
 		numSamples = numClients
@@ -319,12 +319,12 @@ func (mix *Mix) SendOutMsg(msgChan chan *rpc.ConvoMsg) {
 		}
 
 		// Find local endpoint mapped to address.
-		clIdx, found := mix.ClientsByAddress[string(addr)]
+		clIdx, found := mix.CurClientsByAddress[string(addr)]
 		if !found {
 			fmt.Printf("Client to contact not known (no TLS certificate available).\n")
 			continue
 		}
-		client := mix.Clients[clIdx]
+		client := mix.CurClients[clIdx]
 
 		// Extract message to send.
 		msg, err := exitMsg.Content()
@@ -376,7 +376,7 @@ func (mix *Mix) RotateRoundState() {
 
 		<-mix.RoundTicker.C
 
-		numClients := len(mix.Clients)
+		numClients := len(mix.CurClients)
 		numSamples := numClients / 100
 		if numSamples < 100 {
 			numSamples = numClients
@@ -640,13 +640,12 @@ func (mix *Mix) AddConvoMsg(connWrite quic.Stream, sender string) {
 	}
 
 	mix.muAddMsgs.Lock()
+	defer mix.muAddMsgs.Unlock()
 
 	// Check participation map for an entry for
 	// this sender address.
 	alreadySentInRound, _ := mix.ClientsSeen[sender]
 	if alreadySentInRound {
-
-		mix.muAddMsgs.Unlock()
 
 		// Respond to client with 'wait' code.
 		fmt.Fprintf(connWrite, "2\n")
@@ -656,8 +655,6 @@ func (mix *Mix) AddConvoMsg(connWrite quic.Stream, sender string) {
 
 	mix.ClientsSeen[sender] = true
 	mix.FirstPool = append(mix.FirstPool, &convoMsg)
-
-	mix.muAddMsgs.Unlock()
 
 	// Acknowledge client.
 	fmt.Fprintf(connWrite, "0\n")
@@ -670,8 +667,8 @@ func (mix *Mix) HandleBatchMsgs(connWrite quic.Stream, sender string) error {
 
 	// Ensure only the predecessor mix is able to
 	// take up this mix node's compute ressources.
-	if sender != strings.Split(mix.ChainMatrix[mix.OwnChain][(mix.OwnIndex-1)].Addr, ":")[0] {
-		return fmt.Errorf("node at '%s' tried to send a message batch but we expect predecessor '%s'", sender, mix.ChainMatrix[mix.OwnChain][(mix.OwnIndex-1)].Addr)
+	if sender != strings.Split(mix.CurCascadesMatrix[mix.OwnChain][(mix.OwnIndex-1)].Addr, ":")[0] {
+		return fmt.Errorf("node at '%s' tried to send a message batch but we expect predecessor '%s'", sender, mix.CurCascadesMatrix[mix.OwnChain][(mix.OwnIndex-1)].Addr)
 	}
 
 	for {
@@ -746,6 +743,85 @@ func (mix *Mix) HandleBatchMsgs(connWrite quic.Stream, sender string) error {
 			mix.muAddMsgs.Lock()
 			mix.FirstPool = append(mix.FirstPool, &convoMsg)
 			mix.muAddMsgs.Unlock()
+		}
+	}
+}
+
+// RunRounds executes all relevant components
+// of regular mix-net rounds on a mix node
+// during one epoch's time.
+func (mix *Mix) RunRounds() {
+
+	// Determine this mix node's place in cascades matrix.
+	mix.SetOwnPlace()
+
+	// Connect to each mix node's successor mix.
+	err := mix.ReconnectToSuccessor()
+	if err != nil {
+		fmt.Printf("Failed to connect to mix node's successor mix: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Initialize state on mix for upcoming round.
+	err = mix.InitNewRound()
+	if err != nil {
+		fmt.Printf("Failed generating cover traffic messages for pool: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Run mix node part of mix-net round
+	// protocol in background.
+	go mix.RotateRoundState()
+
+	if mix.IsEntry {
+
+		for {
+
+			// Wait for incoming connections on public socket.
+			session, err := mix.PubListener.Accept()
+			if err != nil {
+				fmt.Printf("Public connection error: %v\n", err)
+				continue
+			}
+
+			// Upgrade session to stream.
+			connWrite, err := session.AcceptStream()
+			if err != nil {
+				fmt.Printf("Failed accepting incoming stream: %v\n", err)
+				continue
+			}
+
+			sender := strings.Split(session.RemoteAddr().String(), ":")[0]
+
+			// At entry mixes we only receive single
+			// conversation messages from clients.
+			// We handle them directly.
+			go mix.AddConvoMsg(connWrite, sender)
+		}
+	} else {
+
+		// Wait for incoming connections on public socket.
+		session, err := mix.PubListener.Accept()
+		if err != nil {
+			fmt.Printf("Public connection error: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Upgrade session to stream.
+		connWrite, err := session.AcceptStream()
+		if err != nil {
+			fmt.Printf("Failed accepting incoming stream: %v\n", err)
+			os.Exit(1)
+		}
+
+		sender := strings.Split(session.RemoteAddr().String(), ":")[0]
+
+		// At non-entry mixes we only expect to receive
+		// Cap'n Proto batch messages.
+		err = mix.HandleBatchMsgs(connWrite, sender)
+		if err != nil {
+			fmt.Printf("Failed to handle batch messages: %v\n", err)
+			os.Exit(1)
 		}
 	}
 }

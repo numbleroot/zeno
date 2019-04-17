@@ -42,21 +42,26 @@ type ConvoMsg struct {
 // Node collects the basic information
 // any node in our system works with.
 type Node struct {
-	RecvPubKey            *[32]byte
-	RecvSecKey            *[32]byte
-	PubLisAddr            string
-	PubTLSConfAsServer    *tls.Config
-	PubCertPEM            []byte
-	PubListener           quic.Listener
-	PKIAddr               string
-	PKILisAddr            string
-	PKITLSConfAsClient    *tls.Config
-	PKITLSConfAsServer    *tls.Config
-	PKIListener           quic.Listener
-	ChainMatrixConfigured chan struct{}
-	ChainMatrix           [][]*Endpoint
-	Clients               []*Endpoint
-	ClientsByAddress      map[string]int
+	RecvPubKey           *[32]byte
+	RecvSecKey           *[32]byte
+	PubLisAddr           string
+	PubTLSConfAsServer   *tls.Config
+	PubCertPEM           []byte
+	PubListener          quic.Listener
+	PKIAddr              string
+	PKILisAddr           string
+	PKITLSConfAsClient   *tls.Config
+	PKITLSConfAsServer   *tls.Config
+	PKIListener          quic.Listener
+	SigRotateEpoch       chan struct{}
+	CurCascadesMatrix    [][]*Endpoint
+	NextCascadesMatrix   [][]*Endpoint
+	SigMixesElected      chan struct{}
+	CurClients           []*Endpoint
+	CurClientsByAddress  map[string]int
+	NextClients          []*Endpoint
+	NextClientsByAddress map[string]int
+	SigClientsAdded      chan struct{}
 }
 
 // Client represents a client node in

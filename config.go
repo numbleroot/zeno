@@ -2,21 +2,13 @@ package main
 
 import "time"
 
+// EpochBrick is the smallest building
+// block for durations in epochs.
+const EpochBrick = 5 * time.Second
+
 // RoundTime specifies the per-mix
 // duration of accepting messages.
 const RoundTime = 2 * time.Second
-
-// ExitMsgOverhead specifies the amount
-// of overhead in bytes for an end user
-// message after it has been serialized
-// by Cap'n Proto.
-const ExitMsgOverhead = 48
-
-// MixMsgOverhead specifies the amount
-// of overhead in bytes for an onionized
-// message after it has been serialized
-// by Cap'n Proto.
-const MixMsgOverhead = 104
 
 // BatchSizeVariance defines the maximum
 // amount of messages added additionally
@@ -26,7 +18,7 @@ const BatchSizeVariance = 5
 
 // NumCascades defines the number of
 // distinct cascades that make up the
-// chain matrix.
+// cascades matrix.
 const NumCascades = 1
 
 // LenCascade defines the number of mixes

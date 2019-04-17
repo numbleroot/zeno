@@ -1,9 +1,7 @@
 package main
 
 import (
-	"bytes"
 	"crypto/rand"
-	"encoding/gob"
 	"flag"
 	"fmt"
 	"os"
@@ -19,7 +17,7 @@ func main() {
 
 	// Allow for and require various arguments.
 	isClientFlag := flag.Bool("client", false, "Append this flag on a node representing a client of the mix-net.")
-	isMixFlag := flag.Bool("mix", false, "Append this flag on a node taking up mix responsibilities.")
+	isMixFlag := flag.Bool("mix", false, "Append this flag on a node intended for mix responsibilities (might still become regular client).")
 	pkiAddrFlag := flag.String("pki", "127.0.0.1:10001", "Provide ip:port address string of PKI for mix-net.")
 	pkiCertPathFlag := flag.String("pkiCertPath", filepath.Join(os.Getenv("GOPATH"), "src/github.com/numbleroot/zeno-pki/cert.pem"), "Specify file system path to PKI server TLS certificate.")
 	msgLisAddrFlag := flag.String("msgLisAddr", "", "Specify on which ip:port address for this node to listen for messages.")
@@ -79,19 +77,21 @@ func main() {
 	}
 
 	node := &Node{
-		RecvPubKey:            recvPubKey,
-		RecvSecKey:            recvSecKey,
-		PubLisAddr:            msgLisAddr,
-		PubTLSConfAsServer:    pubTLSConfAsServer,
-		PubCertPEM:            pubCertPEM,
-		PKIAddr:               pkiAddr,
-		PKILisAddr:            pkiLisAddr,
-		PKITLSConfAsClient:    pkiTLSConfAsClient,
-		PKITLSConfAsServer:    pubTLSConfAsServer,
-		ChainMatrixConfigured: make(chan struct{}),
+		RecvPubKey:         recvPubKey,
+		RecvSecKey:         recvSecKey,
+		PubLisAddr:         msgLisAddr,
+		PubTLSConfAsServer: pubTLSConfAsServer,
+		PubCertPEM:         pubCertPEM,
+		PKIAddr:            pkiAddr,
+		PKILisAddr:         pkiLisAddr,
+		PKITLSConfAsClient: pkiTLSConfAsClient,
+		PKITLSConfAsServer: pubTLSConfAsServer,
+		SigRotateEpoch:     make(chan struct{}),
+		SigMixesElected:    make(chan struct{}),
+		SigClientsAdded:    make(chan struct{}),
 	}
 
-	// Start listening for incoming mix-net messages.
+	// Open socket for incoming mix-net messages.
 	node.PubListener, err = quic.ListenAddr(node.PubLisAddr, node.PubTLSConfAsServer, nil)
 	if err != nil {
 		fmt.Printf("Failed to listen for mix-net messages on socket %s: %v\n", node.PubLisAddr, err)
@@ -99,7 +99,7 @@ func main() {
 	}
 	defer node.PubListener.Close()
 
-	// Open up socket for eventual chain matrix
+	// Open up socket for eventual cascades matrix
 	// election data from PKI.
 	node.PKIListener, err = quic.ListenAddr(node.PKILisAddr, node.PKITLSConfAsServer, nil)
 	if err != nil {
@@ -108,220 +108,67 @@ func main() {
 	}
 	defer node.PKIListener.Close()
 
-	// Handle messages from PKI.
-	go node.HandlePKIMsgs()
+	// Wait for and act upon messages from PKI.
+	go node.AcceptMsgsFromPKI()
 
-	if isMix {
-
-		// Nodes that offer to take up a mix role
-		// register their intent with the PKI.
-		err = node.RegisterAtPKI("mixes")
-		if err != nil {
-			fmt.Printf("Failed to register intent for mixing at PKI server: %v\n", err)
-			os.Exit(1)
-		}
-
-	} else if isClient {
-
-		// Nodes that are regular clients in the
-		// system register with their address and
-		// receive public key at the PKI.
-		err = node.RegisterAtPKI("clients")
-		if err != nil {
-			fmt.Printf("Failed to register as client at PKI server: %v\n", err)
-			os.Exit(1)
-		}
-	}
-
-	fmt.Printf("Waiting for chain matrix to configure...\n")
-
-	// Wait until chain matrix has been built.
-	<-node.ChainMatrixConfigured
-
-	fmt.Printf("Chain matrix configured.\n\n")
-
-	elected := false
-
-	if isMix {
-
-		// Figure out whether the mix intent of this
-		// node resulted in it getting elected.
-		for chain := range node.ChainMatrix {
-
-			for m := range node.ChainMatrix[chain] {
-
-				if bytes.Equal(node.ChainMatrix[chain][m].PubKey[:], node.RecvPubKey[:]) {
-					elected = true
-					break
-				}
-			}
-
-			if elected {
-				break
-			}
-		}
-
-		if !elected {
-
-			fmt.Printf("Node %s wanted to be a mix, but was not elected.\n", node.PubLisAddr)
-
-			// This node intended to become a mix yet did
-			// not get elected. Register as regular client.
-			err = node.RegisterAtPKI("clients")
-			if err != nil {
-				fmt.Printf("Failed to late-register as client at PKI server: %v\n", err)
-				os.Exit(1)
-			}
-		} else {
-			fmt.Printf("Node %s has been elected to be a mix.\n", node.PubLisAddr)
-		}
-	}
-
-	// Query PKI for all known clients and stash
-	// list of Endpoints for later use.
-	err = node.GetAllClients()
+	// Prepare the upcoming epoch by electing
+	// cascades and receiving all clients.
+	elected, err := node.PrepareNextEpoch(isMix, isClient)
 	if err != nil {
-		fmt.Printf("Failed retrieving all known clients from PKI: %v\n", err)
+		fmt.Printf("Preparing upcoming epoch failed: %v", err)
 		os.Exit(1)
 	}
 
-	if elected {
+	for {
 
-		// This node is a mix and was elected
-		// to be part of the chain matrix.
+		// Swap elected mixes and registered clients
+		// for upcoming epoch to current.
+		node.CurCascadesMatrix = node.NextCascadesMatrix
+		node.CurClients = node.NextClients
+		node.CurClientsByAddress = node.NextClientsByAddress
 
-		mix := &Mix{
-			Node: node,
-		}
+		if elected {
 
-		// Determine this mix node's place in chain matrix.
-		mix.SetOwnPlace()
-
-		// Connect to each mix node's successor mix.
-		err := mix.ReconnectToSuccessor()
-		if err != nil {
-			fmt.Printf("Failed to connect to mix node's successor mix: %v\n", err)
-			os.Exit(1)
-		}
-
-		// Initialize state on mix for upcoming round.
-		err = mix.InitNewRound()
-		if err != nil {
-			fmt.Printf("Failed generating cover traffic messages for pool: %v\n", err)
-			os.Exit(1)
-		}
-
-		// Run mix node part of mix-net round
-		// protocol in background.
-		go mix.RotateRoundState()
-
-		if mix.IsEntry {
-
-			for {
-
-				// Wait for incoming connections on public socket.
-				session, err := mix.PubListener.Accept()
-				if err != nil {
-					fmt.Printf("Public connection error: %v\n", err)
-					continue
-				}
-
-				// Upgrade session to stream.
-				connWrite, err := session.AcceptStream()
-				if err != nil {
-					fmt.Printf("Failed accepting incoming stream: %v\n", err)
-					continue
-				}
-
-				sender := strings.Split(session.RemoteAddr().String(), ":")[0]
-
-				// At entry mixes we only receive single
-				// conversation messages from clients.
-				// We handle them directly.
-				go mix.AddConvoMsg(connWrite, sender)
+			mix := &Mix{
+				Node: node,
 			}
+
+			// This node is a mix and was elected
+			// to be part of the cascades matrix.
+			// Run rounds protocol in background.
+			go mix.RunRounds()
+
+			// Wait for signal to prepare next epoch.
+			<-mix.SigRotateEpoch
+
+			// Prepare the upcoming epoch by electing
+			// cascades and receiving all clients.
+			elected, err = mix.PrepareNextEpoch(isMix, isClient)
+			if err != nil {
+				fmt.Printf("Preparing upcoming epoch failed: %v", err)
+				os.Exit(1)
+			}
+
 		} else {
 
-			// Wait for incoming connections on public socket.
-			session, err := mix.PubListener.Accept()
+			client := &Client{
+				Node:   node,
+				SendWG: &sync.WaitGroup{},
+			}
+
+			// This node is a client. Run rounds
+			// protocol in background.
+			go client.RunRounds()
+
+			// Wait for signal to prepare next epoch.
+			<-client.SigRotateEpoch
+
+			// Prepare the upcoming epoch by electing
+			// cascades and receiving all clients.
+			elected, err = client.PrepareNextEpoch(isMix, isClient)
 			if err != nil {
-				fmt.Printf("Public connection error: %v\n", err)
+				fmt.Printf("Preparing upcoming epoch failed: %v", err)
 				os.Exit(1)
-			}
-
-			// Upgrade session to stream.
-			connWrite, err := session.AcceptStream()
-			if err != nil {
-				fmt.Printf("Failed accepting incoming stream: %v\n", err)
-				os.Exit(1)
-			}
-
-			sender := strings.Split(session.RemoteAddr().String(), ":")[0]
-
-			// At non-entry mixes we only expect to receive
-			// Cap'n Proto batch messages.
-			err = mix.HandleBatchMsgs(connWrite, sender)
-			if err != nil {
-				fmt.Printf("Failed to handle batch messages: %v\n", err)
-				os.Exit(1)
-			}
-		}
-
-	} else {
-
-		// This node is a client.
-
-		client := &Client{
-			Node:   node,
-			SendWG: &sync.WaitGroup{},
-		}
-
-		// Use map to deduplicate incoming messages.
-		// We only forward messages to application layer
-		// that we have not already passed on before.
-		recvdMsgs := make(map[string]bool)
-
-		// Handle messaging loop.
-		go client.SendMsg()
-
-		for {
-
-			// Wait for incoming connections on public socket.
-			session, err := client.PubListener.Accept()
-			if err != nil {
-				fmt.Printf("Public connection error: %v\n", err)
-				continue
-			}
-
-			// Upgrade session to stream.
-			connWrite, err := session.AcceptStream()
-			if err != nil {
-				fmt.Printf("Failed accepting incoming stream: %v\n", err)
-				continue
-			}
-			decoder := gob.NewDecoder(connWrite)
-
-			// Wait for a message.
-			var msg []byte
-			err = decoder.Decode(&msg)
-			if err != nil {
-				fmt.Printf("Failed decoding incoming message as slice of bytes: %v\n", err)
-				continue
-			}
-
-			// Do not consider cover traffic messages.
-			if !bytes.Equal(msg[0:28], []byte("COVER MESSAGE PLEASE DISCARD")) {
-
-				// Check dedup map for previous encounter.
-				_, seenBefore := recvdMsgs[string(msg[:23])]
-				if !seenBefore {
-
-					// Update message tracker.
-					recvdMsgs[string(msg[:23])] = true
-
-					// Finally, print received message.
-					fmt.Printf("\n@%s> %s\n", msg[17:22], msg[23:])
-				}
 			}
 		}
 	}
