@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/rand"
 	"flag"
 	"fmt"
 	"os"
@@ -10,8 +9,12 @@ import (
 	"sync"
 
 	"github.com/lucas-clemente/quic-go"
-	"golang.org/x/crypto/nacl/box"
 )
+
+// Enable TLS 1.3.
+func init() {
+	os.Setenv("GODEBUG", fmt.Sprintf("%s,tls13=1", os.Getenv("GODEBUG")))
+}
 
 func main() {
 
@@ -51,20 +54,11 @@ func main() {
 	msgLisAddr := *msgLisAddrFlag
 	pkiLisAddr := *pkiLisAddrFlag
 
-	// Generate a public-private key pair used
-	// ONLY for receiving messages. Based on
-	// Curve25519 via NaCl library.
-	recvPubKey, recvSecKey, err := box.GenerateKey(rand.Reader)
-	if err != nil {
-		fmt.Printf("Failed to generate public-private key pair for receiving messages: %v\n", err)
-		os.Exit(1)
-	}
-
 	// Generate ephemeral TLS certificate and config
-	// for public listener.
-	pubTLSConfAsServer, pubCertPEM, err := GenPubTLSCertAndConf("localhost", strings.Split(msgLisAddr, ":")[0])
+	// for PKI listener.
+	pkiTLSConfAsServer, pkiCertPEM, err := GenPubTLSCertAndConf("localhost", strings.Split(msgLisAddr, ":")[0])
 	if err != nil {
-		fmt.Printf("Failed generating ephemeral TLS certificate and config: %v\n", err)
+		fmt.Printf("Failed generating ephemeral TLS certificate and config for PKI listener: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -77,27 +71,17 @@ func main() {
 	}
 
 	node := &Node{
-		RecvPubKey:         recvPubKey,
-		RecvSecKey:         recvSecKey,
 		PubLisAddr:         msgLisAddr,
-		PubTLSConfAsServer: pubTLSConfAsServer,
-		PubCertPEM:         pubCertPEM,
 		PKIAddr:            pkiAddr,
 		PKILisAddr:         pkiLisAddr,
 		PKITLSConfAsClient: pkiTLSConfAsClient,
-		PKITLSConfAsServer: pubTLSConfAsServer,
+		PKITLSConfAsServer: pkiTLSConfAsServer,
+		PKICertPEM:         pkiCertPEM,
 		SigRotateEpoch:     make(chan struct{}),
+		SigCloseEpoch:      make(chan struct{}),
 		SigMixesElected:    make(chan struct{}),
 		SigClientsAdded:    make(chan struct{}),
 	}
-
-	// Open socket for incoming mix-net messages.
-	node.PubListener, err = quic.ListenAddr(node.PubLisAddr, node.PubTLSConfAsServer, nil)
-	if err != nil {
-		fmt.Printf("Failed to listen for mix-net messages on socket %s: %v\n", node.PubLisAddr, err)
-		os.Exit(1)
-	}
-	defer node.PubListener.Close()
 
 	// Open up socket for eventual cascades matrix
 	// election data from PKI.
@@ -119,8 +103,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	// TODO: Listeners and connections need to be
-	//       shut down and closed way more explicitely.
+	// Open socket for incoming mix-net messages.
+	node.PubListener, err = quic.ListenAddr(node.PubLisAddr, node.PubTLSConfAsServer, nil)
+	if err != nil {
+		fmt.Printf("Failed to listen for mix-net messages on socket %s: %v\n", node.PubLisAddr, err)
+		os.Exit(1)
+	}
 
 	for {
 
@@ -173,6 +161,24 @@ func main() {
 				fmt.Printf("Preparing upcoming epoch failed: %v", err)
 				os.Exit(1)
 			}
+		}
+
+		// Drain old epoch state.
+		fmt.Printf("\nSending internal signal to drain epoch state\n")
+		node.SigCloseEpoch <- struct{}{}
+		node.SigCloseEpoch <- struct{}{}
+
+		// Close public listener.
+		err = node.PubListener.Close()
+		if err != nil {
+			fmt.Printf("Error while closing public listener: %v\n", err)
+		}
+
+		// Open public listener again.
+		node.PubListener, err = quic.ListenAddr(node.PubLisAddr, node.PubTLSConfAsServer, nil)
+		if err != nil {
+			fmt.Printf("Failed to listen for mix-net messages on socket %s: %v\n", node.PubLisAddr, err)
+			os.Exit(1)
 		}
 	}
 }

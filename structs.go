@@ -10,6 +10,18 @@ import (
 	"github.com/numbleroot/zeno/rpc"
 )
 
+// PKIRegistration bundles all information
+// required for a node to register under
+// various categories with the PKI.
+type PKIRegistration struct {
+	Category       uint8
+	PubAddr        string
+	PubKey         *[32]byte
+	PubCertPEM     []byte
+	ContactAddr    string
+	ContactCertPEM []byte
+}
+
 // Endpoint describes a network-reachable
 // entity on address associated with a
 // public key.
@@ -39,6 +51,10 @@ type ConvoMsg struct {
 	Content []byte
 }
 
+// TODO: Make all Pub* elements also
+//       available in CurPub* and NextPub*
+//       variants and switch accordingly
+//       after PrepareUpcomingEpoch().
 // Node collects the basic information
 // any node in our system works with.
 type Node struct {
@@ -52,16 +68,18 @@ type Node struct {
 	PKILisAddr           string
 	PKITLSConfAsClient   *tls.Config
 	PKITLSConfAsServer   *tls.Config
+	PKICertPEM           []byte
 	PKIListener          quic.Listener
 	SigRotateEpoch       chan struct{}
+	SigCloseEpoch        chan struct{}
+	SigMixesElected      chan struct{}
+	SigClientsAdded      chan struct{}
 	CurCascadesMatrix    [][]*Endpoint
 	NextCascadesMatrix   [][]*Endpoint
-	SigMixesElected      chan struct{}
 	CurClients           []*Endpoint
 	CurClientsByAddress  map[string]int
 	NextClients          []*Endpoint
 	NextClientsByAddress map[string]int
-	SigClientsAdded      chan struct{}
 }
 
 // Client represents a client node in

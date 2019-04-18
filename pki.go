@@ -3,31 +3,29 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"crypto/rand"
 	"crypto/x509"
 	"encoding/binary"
+	"encoding/gob"
 	"encoding/hex"
 	"fmt"
-	"math/rand"
-	"os"
+	mathrand "math/rand"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/lucas-clemente/quic-go"
+	"golang.org/x/crypto/nacl/box"
 	"golang.org/x/crypto/scrypt"
 	"golang.org/x/crypto/sha3"
 )
 
-// Enable TLS 1.3.
-func init() {
-	os.Setenv("GODEBUG", fmt.Sprintf("%s,tls13=1", os.Getenv("GODEBUG")))
-}
-
 // RegisterAtPKI accepts a category to register a
-// node of this system under at the PKI, 'mixes'
-// or 'clients'. It transmit relevant node and
-// connection information via TLS to the PKI server.
-func (node *Node) RegisterAtPKI(category string) error {
+// node of this system under at the PKI, 0 signals
+// 'node wants to be a mix', 1 signals 'node is a
+// client'. It transmit relevant node and connection
+// information via TLS to the PKI server.
+func (node *Node) RegisterAtPKI(category uint8) error {
 
 	var resp string
 
@@ -46,13 +44,24 @@ func (node *Node) RegisterAtPKI(category string) error {
 		if err != nil {
 			return err
 		}
+		encoder := gob.NewEncoder(connWrite)
 
 		// Create buffered I/O reader from connection.
 		connRead := bufio.NewReader(connWrite)
 
-		// Register this node's intent on participating
-		// in a particular role with the PKI.
-		fmt.Fprintf(connWrite, "%s %s %s %x %x\n", category, node.PubLisAddr, node.PKILisAddr, *node.RecvPubKey, node.PubCertPEM)
+		// Transmit information required to register
+		// this node under specified category at PKI.
+		err = encoder.Encode(&PKIRegistration{
+			Category:       category,
+			PubAddr:        node.PubLisAddr,
+			PubKey:         node.RecvPubKey,
+			PubCertPEM:     node.PubCertPEM,
+			ContactAddr:    node.PKILisAddr,
+			ContactCertPEM: node.PKICertPEM,
+		})
+		if err != nil {
+			return err
+		}
 
 		// Expect an acknowledgement.
 		resp, err = connRead.ReadString('\n')
@@ -66,7 +75,7 @@ func (node *Node) RegisterAtPKI(category string) error {
 
 			// Wrong phase in epoch protocol.
 			// Wait a bit and try again.
-			fmt.Printf("Registration for %s at PKI was inconvenient. Waiting %v and trying again...\n", category, (1 * time.Second))
+			fmt.Printf("Registration for %d at PKI was inconvenient. Waiting %v and trying again...\n", category, (1 * time.Second))
 			time.Sleep(1 * time.Second)
 
 		} else if resp != "0" {
@@ -170,7 +179,7 @@ func (node *Node) ElectMixes(data []string) error {
 	seed := binary.LittleEndian.Uint64(scryptPass)
 
 	// Seed math.Rand with created seed.
-	prng := rand.New(rand.NewSource(int64(seed)))
+	prng := mathrand.New(mathrand.NewSource(int64(seed)))
 
 	// Prepare appropriately sized cascades matrix.
 	node.NextCascadesMatrix = make([][]*Endpoint, NumCascades)
@@ -383,11 +392,31 @@ func (node *Node) AcceptMsgsFromPKI() {
 // upon those data sets.
 func (node *Node) PrepareNextEpoch(isMix bool, isClient bool) (bool, error) {
 
+	// Generate a public-private key pair used
+	// ONLY for receiving messages. Based on
+	// Curve25519 via NaCl library.
+	recvPubKey, recvSecKey, err := box.GenerateKey(rand.Reader)
+	if err != nil {
+		return false, fmt.Errorf("failed to generate public-private key pair for receiving messages: %v", err)
+	}
+
+	// Generate ephemeral TLS certificate and config
+	// for public listener.
+	pubTLSConfAsServer, pubCertPEM, err := GenPubTLSCertAndConf("localhost", strings.Split(node.PubLisAddr, ":")[0])
+	if err != nil {
+		return false, fmt.Errorf("failed generating ephemeral TLS certificate and config: %v", err)
+	}
+
+	node.RecvPubKey = recvPubKey
+	node.RecvSecKey = recvSecKey
+	node.PubTLSConfAsServer = pubTLSConfAsServer
+	node.PubCertPEM = pubCertPEM
+
 	if isMix {
 
 		// Nodes that offer to take up a mix role
 		// register their intent with the PKI.
-		err := node.RegisterAtPKI("mixes")
+		err := node.RegisterAtPKI(0)
 		if err != nil {
 			return false, fmt.Errorf("failed to register mix intent: %v", err)
 		}
@@ -397,7 +426,7 @@ func (node *Node) PrepareNextEpoch(isMix bool, isClient bool) (bool, error) {
 		// Nodes that are regular clients in the
 		// system register with their address and
 		// receive public key at the PKI.
-		err := node.RegisterAtPKI("clients")
+		err := node.RegisterAtPKI(1)
 		if err != nil {
 			return false, fmt.Errorf("failed to register as client: %v", err)
 		}
@@ -436,7 +465,7 @@ func (node *Node) PrepareNextEpoch(isMix bool, isClient bool) (bool, error) {
 
 			// This node intended to become a mix yet did
 			// not get elected. Register as regular client.
-			err := node.RegisterAtPKI("clients")
+			err := node.RegisterAtPKI(1)
 			if err != nil {
 				return elected, fmt.Errorf("failed to late-register as client: %v", err)
 			}

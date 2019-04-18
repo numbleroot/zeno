@@ -167,6 +167,11 @@ func (cl *Client) OnionEncryptAndSend(text []byte, recipient string, chain int) 
 			CurvePreferences:   []tls.CurveID{tls.X25519},
 		}, nil)
 		if err != nil {
+
+			if err.Error() == "NO_ERROR" {
+				return
+			}
+
 			fmt.Printf("Failed connecting to entry mix of cascade %d via QUIC: %v\n", chain, err)
 			os.Exit(1)
 		}
@@ -174,6 +179,11 @@ func (cl *Client) OnionEncryptAndSend(text []byte, recipient string, chain int) 
 		// Upgrade session to blocking stream.
 		stream, err := session.OpenStreamSync()
 		if err != nil {
+
+			if err.Error() == "NO_ERROR" {
+				return
+			}
+
 			fmt.Printf("Failed to upgrade QUIC session to stream: %v\n", err)
 			os.Exit(1)
 		}
@@ -191,6 +201,11 @@ func (cl *Client) OnionEncryptAndSend(text []byte, recipient string, chain int) 
 		// Wait for acknowledgement.
 		status, err = connRead.ReadString('\n')
 		if err != nil {
+
+			if err.Error() == "NO_ERROR" {
+				return
+			}
+
 			fmt.Printf("Failed to receive response to delivery of conversation message: %v\n", err)
 			os.Exit(1)
 		}
@@ -221,8 +236,6 @@ func (cl *Client) SendMsg() {
 
 		if cl.CurClients[i].Addr == cl.PubLisAddr {
 
-			fmt.Printf("This node's client index: %d\n", i)
-
 			// If own index is even, partnering client
 			// is the next one. If it is odd, the partner
 			// is the preceding client.
@@ -241,48 +254,61 @@ func (cl *Client) SendMsg() {
 	var msgID uint16
 	for msgID = 0; msgID <= 65535; msgID++ {
 
-		// Prepare the needed new round state,
-		// primarily including fresh key material.
-		err := cl.InitNewRound()
-		if err != nil {
-			fmt.Printf("Initiating new round failed: %v\n", err)
-			os.Exit(1)
+		select {
+		case <-cl.SigCloseEpoch:
+
+			fmt.Printf("\nSIG @ CLIENT SEND! Closing epoch\n")
+
+			// In case the current epoch is wrapping
+			// up, return from this function to stop
+			// listening for client messages.
+			return
+
+		default:
+
+			// Prepare the needed new round state,
+			// primarily including fresh key material.
+			err := cl.InitNewRound()
+			if err != nil {
+				fmt.Printf("Initiating new round failed: %v\n", err)
+				os.Exit(1)
+			}
+
+			// Prepare message to send.
+			msg := new([360]byte)
+
+			// First 17 bytes will be conversation ID.
+			copy(msg[:], convoID)
+
+			// Bytes 18 - 23 are the message sequence number.
+			copy(msg[17:], fmt.Sprintf("%05d;", msgID))
+
+			// Bytes 24 - 360 are the actual message.
+			copy(msg[23:], Msg)
+
+			cl.SendWG.Add(len(cl.CurCascadesMatrix))
+
+			// In parallel, reverse onion-encrypt the
+			// message and send to all entry mixes.
+			for chain := range cl.CurCascadesMatrix {
+				go cl.OnionEncryptAndSend(msg[:], partner, chain)
+			}
+
+			// Wait for all entry messages to be sent.
+			cl.SendWG.Wait()
+
+			cl.SendWG.Add(len(cl.CurCascadesMatrix))
+
+			// In order to counter potential message loss
+			// in cascades, clients send each message again
+			// in the subsequent round.
+			for chain := range cl.CurCascadesMatrix {
+				go cl.OnionEncryptAndSend(msg[:], partner, chain)
+			}
+
+			// Wait for all entry messages to be sent.
+			cl.SendWG.Wait()
 		}
-
-		// Prepare message to send.
-		msg := new([360]byte)
-
-		// First 17 bytes will be conversation ID.
-		copy(msg[:], convoID)
-
-		// Bytes 18 - 23 are the message sequence number.
-		copy(msg[17:], fmt.Sprintf("%05d;", msgID))
-
-		// Bytes 24 - 360 are the actual message.
-		copy(msg[23:], Msg)
-
-		cl.SendWG.Add(len(cl.CurCascadesMatrix))
-
-		// In parallel, reverse onion-encrypt the
-		// message and send to all entry mixes.
-		for chain := range cl.CurCascadesMatrix {
-			go cl.OnionEncryptAndSend(msg[:], partner, chain)
-		}
-
-		// Wait for all entry messages to be sent.
-		cl.SendWG.Wait()
-
-		cl.SendWG.Add(len(cl.CurCascadesMatrix))
-
-		// In order to counter potential message loss
-		// in cascades, clients send each message again
-		// in the subsequent round.
-		for chain := range cl.CurCascadesMatrix {
-			go cl.OnionEncryptAndSend(msg[:], partner, chain)
-		}
-
-		// Wait for all entry messages to be sent.
-		cl.SendWG.Wait()
 	}
 }
 
@@ -301,41 +327,54 @@ func (cl *Client) RunRounds() {
 
 	for {
 
-		// Wait for incoming connections on public socket.
-		session, err := cl.PubListener.Accept()
-		if err != nil {
-			fmt.Printf("Public connection error: %v\n", err)
-			continue
-		}
+		select {
+		case <-cl.SigCloseEpoch:
 
-		// Upgrade session to stream.
-		connWrite, err := session.AcceptStream()
-		if err != nil {
-			fmt.Printf("Failed accepting incoming stream: %v\n", err)
-			continue
-		}
-		decoder := gob.NewDecoder(connWrite)
+			fmt.Printf("\nSIG @ CLIENT RECV! Closing epoch\n")
 
-		// Wait for a message.
-		var msg []byte
-		err = decoder.Decode(&msg)
-		if err != nil {
-			fmt.Printf("Failed decoding incoming message as slice of bytes: %v\n", err)
-			continue
-		}
+			// In case the current epoch is wrapping
+			// up, return from this function to stop
+			// listening for client messages.
+			return
 
-		// Do not consider cover traffic messages.
-		if !bytes.Equal(msg[0:28], []byte("COVER MESSAGE PLEASE DISCARD")) {
+		default:
 
-			// Check dedup map for previous encounter.
-			_, seenBefore := recvdMsgs[string(msg[:23])]
-			if !seenBefore {
+			// Wait for incoming connections on public socket.
+			session, err := cl.PubListener.Accept()
+			if err != nil {
+				fmt.Printf("Public connection error: %v\n", err)
+				continue
+			}
 
-				// Update message tracker.
-				recvdMsgs[string(msg[:23])] = true
+			// Upgrade session to stream.
+			connWrite, err := session.AcceptStream()
+			if err != nil {
+				fmt.Printf("Failed accepting incoming stream: %v\n", err)
+				continue
+			}
+			decoder := gob.NewDecoder(connWrite)
 
-				// Finally, print received message.
-				fmt.Printf("\n@%s> %s\n", msg[17:22], msg[23:])
+			// Wait for a message.
+			var msg []byte
+			err = decoder.Decode(&msg)
+			if err != nil {
+				fmt.Printf("Failed decoding incoming message as slice of bytes: %v\n", err)
+				continue
+			}
+
+			// Do not consider cover traffic messages.
+			if !bytes.Equal(msg[0:28], []byte("COVER MESSAGE PLEASE DISCARD")) {
+
+				// Check dedup map for previous encounter.
+				_, seenBefore := recvdMsgs[string(msg[:23])]
+				if !seenBefore {
+
+					// Update message tracker.
+					recvdMsgs[string(msg[:23])] = true
+
+					// Finally, print received message.
+					fmt.Printf("\n@%s> %s\n", msg[17:22], msg[23:])
+				}
 			}
 		}
 	}
