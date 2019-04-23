@@ -54,8 +54,8 @@ func (node *Node) RegisterAtPKI(category uint8) error {
 		err = encoder.Encode(&PKIRegistration{
 			Category:       category,
 			PubAddr:        node.PubLisAddr,
-			PubKey:         node.RecvPubKey,
-			PubCertPEM:     node.PubCertPEM,
+			PubKey:         node.NextRecvPubKey,
+			PubCertPEM:     node.NextPubCertPEM,
 			ContactAddr:    node.PKILisAddr,
 			ContactCertPEM: node.PKICertPEM,
 		})
@@ -407,10 +407,10 @@ func (node *Node) PrepareNextEpoch(isMix bool, isClient bool) (bool, error) {
 		return false, fmt.Errorf("failed generating ephemeral TLS certificate and config: %v", err)
 	}
 
-	node.RecvPubKey = recvPubKey
-	node.RecvSecKey = recvSecKey
-	node.PubTLSConfAsServer = pubTLSConfAsServer
-	node.PubCertPEM = pubCertPEM
+	node.NextRecvPubKey = recvPubKey
+	node.NextRecvSecKey = recvSecKey
+	node.NextPubTLSConfAsServer = pubTLSConfAsServer
+	node.NextPubCertPEM = pubCertPEM
 
 	if isMix {
 
@@ -448,7 +448,7 @@ func (node *Node) PrepareNextEpoch(isMix bool, isClient bool) (bool, error) {
 
 			for m := range node.NextCascadesMatrix[chain] {
 
-				if bytes.Equal(node.NextCascadesMatrix[chain][m].PubKey[:], node.RecvPubKey[:]) {
+				if bytes.Equal(node.NextCascadesMatrix[chain][m].PubKey[:], node.NextRecvPubKey[:]) {
 					elected = true
 					break
 				}
@@ -480,8 +480,6 @@ func (node *Node) PrepareNextEpoch(isMix bool, isClient bool) (bool, error) {
 	// Wait for signal that set of clients for
 	// upcoming epoch has been received and parsed.
 	<-node.SigClientsAdded
-
-	fmt.Printf("\nShall the regular rounds begin!\n")
 
 	return elected, nil
 }

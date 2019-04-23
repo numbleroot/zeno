@@ -103,25 +103,34 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Open socket for incoming mix-net messages.
-	node.PubListener, err = quic.ListenAddr(node.PubLisAddr, node.PubTLSConfAsServer, nil)
-	if err != nil {
-		fmt.Printf("Failed to listen for mix-net messages on socket %s: %v\n", node.PubLisAddr, err)
-		os.Exit(1)
+	mix := &Mix{
+		Node: node,
+	}
+
+	client := &Client{
+		Node:       node,
+		muUpdState: &sync.RWMutex{},
 	}
 
 	for {
 
-		// Swap elected mixes and registered clients
-		// for upcoming epoch to current.
-		node.CurCascadesMatrix = node.NextCascadesMatrix
-		node.CurClients = node.NextClients
-		node.CurClientsByAddress = node.NextClientsByAddress
-
 		if elected {
 
-			mix := &Mix{
-				Node: node,
+			// Swap state prepared for upcoming epoch
+			// into places for current epoch.
+			node.CurRecvPubKey = node.NextRecvPubKey
+			node.CurRecvSecKey = node.NextRecvSecKey
+			node.CurPubTLSConfAsServer = node.NextPubTLSConfAsServer
+			node.CurPubCertPEM = node.NextPubCertPEM
+			node.CurCascadesMatrix = node.NextCascadesMatrix
+			node.CurClients = node.NextClients
+			node.CurClientsByAddress = node.NextClientsByAddress
+
+			// Open socket for incoming mix-net messages.
+			node.PubListener, err = quic.ListenAddr(node.PubLisAddr, node.CurPubTLSConfAsServer, nil)
+			if err != nil {
+				fmt.Printf("Failed to listen for mix-net messages on socket %s: %v\n", node.PubLisAddr, err)
+				os.Exit(1)
 			}
 
 			// This node is a mix and was elected
@@ -140,12 +149,34 @@ func main() {
 				os.Exit(1)
 			}
 
+			// Drain old epoch state.
+			fmt.Printf("\nSending internal signal to drain epoch state\n")
+			node.SigCloseEpoch <- struct{}{}
+			node.SigCloseEpoch <- struct{}{}
+
 		} else {
 
-			client := &Client{
-				Node:   node,
-				SendWG: &sync.WaitGroup{},
+			client.muUpdState.Lock()
+
+			// Swap state prepared for upcoming epoch
+			// into places for current epoch.
+			node.CurRecvPubKey = node.NextRecvPubKey
+			node.CurRecvSecKey = node.NextRecvSecKey
+			node.CurPubTLSConfAsServer = node.NextPubTLSConfAsServer
+			node.CurPubCertPEM = node.NextPubCertPEM
+			node.CurCascadesMatrix = node.NextCascadesMatrix
+			node.CurClients = node.NextClients
+			node.CurClientsByAddress = node.NextClientsByAddress
+
+			// Open socket for incoming mix-net messages.
+			node.PubListener, err = quic.ListenAddr(node.PubLisAddr, node.CurPubTLSConfAsServer, nil)
+			if err != nil {
+				fmt.Printf("Failed to listen for mix-net messages on socket %s: %v\n", node.PubLisAddr, err)
+				client.muUpdState.Unlock()
+				os.Exit(1)
 			}
+
+			client.muUpdState.Unlock()
 
 			// This node is a client. Run rounds
 			// protocol in background.
@@ -161,12 +192,11 @@ func main() {
 				fmt.Printf("Preparing upcoming epoch failed: %v", err)
 				os.Exit(1)
 			}
-		}
 
-		// Drain old epoch state.
-		fmt.Printf("\nSending internal signal to drain epoch state\n")
-		node.SigCloseEpoch <- struct{}{}
-		node.SigCloseEpoch <- struct{}{}
+			// Drain old epoch state.
+			fmt.Printf("\nSending internal signal to drain epoch state\n")
+			node.SigCloseEpoch <- struct{}{}
+		}
 
 		// Close public listener.
 		err = node.PubListener.Close()
@@ -174,11 +204,6 @@ func main() {
 			fmt.Printf("Error while closing public listener: %v\n", err)
 		}
 
-		// Open public listener again.
-		node.PubListener, err = quic.ListenAddr(node.PubLisAddr, node.PubTLSConfAsServer, nil)
-		if err != nil {
-			fmt.Printf("Failed to listen for mix-net messages on socket %s: %v\n", node.PubLisAddr, err)
-			os.Exit(1)
-		}
+		fmt.Printf("\nShall the regular rounds begin!\n")
 	}
 }

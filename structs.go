@@ -31,6 +31,15 @@ type Endpoint struct {
 	PubCertPool *x509.CertPool
 }
 
+// FlatEndpoint is identical to Endpoint
+// except that it stores values instead
+// of references.
+type FlatEndpoint struct {
+	Addr        string
+	PubKey      [32]byte
+	PubCertPool x509.CertPool
+}
+
 // OnionKeyState collects the keys we need
 // for an onion-encrypted message: the PubKey
 // to prepend to the ciphertext symmetrically
@@ -51,44 +60,43 @@ type ConvoMsg struct {
 	Content []byte
 }
 
-// TODO: Make all Pub* elements also
-//       available in CurPub* and NextPub*
-//       variants and switch accordingly
-//       after PrepareUpcomingEpoch().
 // Node collects the basic information
 // any node in our system works with.
 type Node struct {
-	RecvPubKey           *[32]byte
-	RecvSecKey           *[32]byte
-	PubLisAddr           string
-	PubTLSConfAsServer   *tls.Config
-	PubCertPEM           []byte
-	PubListener          quic.Listener
-	PKIAddr              string
-	PKILisAddr           string
-	PKITLSConfAsClient   *tls.Config
-	PKITLSConfAsServer   *tls.Config
-	PKICertPEM           []byte
-	PKIListener          quic.Listener
-	SigRotateEpoch       chan struct{}
-	SigCloseEpoch        chan struct{}
-	SigMixesElected      chan struct{}
-	SigClientsAdded      chan struct{}
-	CurCascadesMatrix    [][]*Endpoint
-	NextCascadesMatrix   [][]*Endpoint
-	CurClients           []*Endpoint
-	CurClientsByAddress  map[string]int
-	NextClients          []*Endpoint
-	NextClientsByAddress map[string]int
+	PubLisAddr             string
+	PubListener            quic.Listener
+	CurRecvPubKey          *[32]byte
+	CurRecvSecKey          *[32]byte
+	CurPubTLSConfAsServer  *tls.Config
+	CurPubCertPEM          []byte
+	NextRecvPubKey         *[32]byte
+	NextRecvSecKey         *[32]byte
+	NextPubTLSConfAsServer *tls.Config
+	NextPubCertPEM         []byte
+	PKIAddr                string
+	PKILisAddr             string
+	PKITLSConfAsClient     *tls.Config
+	PKITLSConfAsServer     *tls.Config
+	PKICertPEM             []byte
+	PKIListener            quic.Listener
+	SigRotateEpoch         chan struct{}
+	SigCloseEpoch          chan struct{}
+	SigMixesElected        chan struct{}
+	SigClientsAdded        chan struct{}
+	CurCascadesMatrix      [][]*Endpoint
+	NextCascadesMatrix     [][]*Endpoint
+	CurClients             []*Endpoint
+	CurClientsByAddress    map[string]int
+	NextClients            []*Endpoint
+	NextClientsByAddress   map[string]int
 }
 
 // Client represents a client node in
 // our system architecture.
 type Client struct {
 	*Node
-	SendWG    *sync.WaitGroup
-	CurRound  [][]*OnionKeyState
-	PrevRound [][]*OnionKeyState
+	muUpdState *sync.RWMutex
+	IsClient   bool
 }
 
 // Mix represents a mix node in our

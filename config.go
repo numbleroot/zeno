@@ -25,6 +25,23 @@ const NumCascades = 1
 // required to form one mix cascade.
 const LenCascade = 4
 
+// MsgLength defines the number of bytes
+// the conversation messages will have
+// in their original form.
+const MsgLength = 360
+
+// MsgExitOverhead defines the number of
+// additional bytes for a conversation
+// message to be processed by the exit
+// mix and send to the final recipient.
+const MsgExitOverhead = 88
+
+// MsgCascadeOverhead defines the number
+// of bytes of overhead each mix layer
+// adds to the original message for
+// proper processing.
+const MsgCascadeOverhead = 104
+
 // Msg is the conversation message that
 // is sent between participants of the
 // mix-net infrastructure.

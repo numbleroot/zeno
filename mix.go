@@ -29,7 +29,7 @@ func (mix *Mix) SetOwnPlace() {
 
 		for m := range mix.CurCascadesMatrix[chain] {
 
-			if bytes.Equal(mix.CurCascadesMatrix[chain][m].PubKey[:], mix.RecvPubKey[:]) {
+			if bytes.Equal(mix.CurCascadesMatrix[chain][m].PubKey[:], mix.CurRecvPubKey[:]) {
 
 				// If we found this mix' place in the
 				// cascades matrix, set values and signal
@@ -107,9 +107,11 @@ func (mix *Mix) AddCoverMsgsToPool(initFirst bool, numClients int, numSamples in
 		chosen := int(chosenBig.Int64())
 
 		// Prepare cover message.
-		// TODO: Think hard about fill-up with random bytes again.
-		//       Any attacker advantage if we only use zeros to fill up?
-		msgPadded := new([360]byte)
+		msgPadded := make([]byte, MsgLength)
+		_, err = io.ReadFull(rand.Reader, msgPadded)
+		if err != nil {
+			return err
+		}
 		copy(msgPadded[:], "COVER MESSAGE PLEASE DISCARD")
 
 		// Create empty Cap'n Proto messsage.
@@ -180,7 +182,7 @@ func (mix *Mix) AddCoverMsgsToPool(initFirst bool, numClients int, numSamples in
 			}
 
 			// Marshal final ConvoExitMsg to byte slice.
-			msg, err := protoMsg.MarshalPacked()
+			msg, err := protoMsg.Marshal()
 			if err != nil {
 				return err
 			}
@@ -212,7 +214,7 @@ func (mix *Mix) AddCoverMsgsToPool(initFirst bool, numClients int, numSamples in
 				convoMixMsg.SetContent(encMsg)
 
 				// Marshal final ConvoMixMsg to byte slice.
-				msg, err = protoMsg.MarshalPacked()
+				msg, err = protoMsg.Marshal()
 				if err != nil {
 					fmt.Printf("Failed marshalling final ConvoMixMsg to []byte: %v\n", err)
 					os.Exit(1)
@@ -604,12 +606,26 @@ func (mix *Mix) AddConvoMsg(connWrite quic.Stream, sender string) {
 	}
 	copy(pubKey[:], pubKeyRaw)
 
-	// Extract packed forward message from
+	// Extract forward message from
 	// received convo message.
 	encConvoMsg, err := encConvoMsgRaw.Content()
 	if err != nil {
 
 		fmt.Printf("Failed to extract content from conversation message: %v\n", err)
+		fmt.Fprintf(connWrite, "1\n")
+
+		return
+	}
+
+	fmt.Printf("len(encConvoMsg): %d\n", len(encConvoMsg))
+
+	// Calculate expected length of message.
+	expLen := MsgLength + ((LenCascade - 1) * MsgCascadeOverhead) + MsgExitOverhead
+
+	// Enforce message to be of correct length.
+	if len(encConvoMsg) != expLen {
+
+		fmt.Printf("Message received from %s was of unexpected size %d bytes (expected %d), discarding.\n", sender, len(encConvoMsg), expLen)
 		fmt.Fprintf(connWrite, "1\n")
 
 		return
@@ -621,7 +637,7 @@ func (mix *Mix) AddConvoMsg(connWrite quic.Stream, sender string) {
 	copy(nonce[:], encConvoMsg[:24])
 
 	// Decrypt message content.
-	convoMsgRaw, ok := box.Open(nil, encConvoMsg[24:], nonce, pubKey, mix.RecvSecKey)
+	convoMsgRaw, ok := box.Open(nil, encConvoMsg[24:], nonce, pubKey, mix.CurRecvSecKey)
 	if !ok {
 
 		fmt.Printf("Failed to decrypt received conversation message by client %s\n", sender)
@@ -630,9 +646,9 @@ func (mix *Mix) AddConvoMsg(connWrite quic.Stream, sender string) {
 		return
 	}
 
-	// Unmarshal packed convo message from
-	// byte slice to Cap'n Proto message.
-	convoMsgProto, err := capnp.UnmarshalPacked(convoMsgRaw)
+	// Unmarshal convo message from byte
+	// slice to Cap'n Proto message.
+	convoMsgProto, err := capnp.Unmarshal(convoMsgRaw)
 	if err != nil {
 
 		fmt.Printf("Error unmarshaling received contained message by client %s: %v\n", sender, err)
@@ -698,7 +714,7 @@ func (mix *Mix) HandleBatchMsgs(connWrite quic.Stream, sender string) error {
 
 		default:
 
-			fmt.Println("A")
+			fmt.Println("BATCH A")
 
 			// Decode message batch in packed format from stream.
 			batchProto, err := capnp.NewPackedDecoder(connWrite).Decode()
@@ -733,11 +749,21 @@ func (mix *Mix) HandleBatchMsgs(connWrite quic.Stream, sender string) error {
 				}
 				copy(pubKey[:], pubKeyRaw)
 
-				// Extract packed forward message from
+				// Extract forward message from
 				// received convo message.
 				encConvoMsg, err := encConvoMsgRaw.Content()
 				if err != nil {
 					return err
+				}
+
+				fmt.Printf("len(encConvoMsg): %d\n", len(encConvoMsg))
+
+				// Calculate expected length of message.
+				expLen := MsgLength + ((LenCascade - mix.OwnIndex - 1) * MsgCascadeOverhead) + MsgExitOverhead
+
+				// Enforce message to be of correct length.
+				if len(encConvoMsg) != expLen {
+					return fmt.Errorf("message received from %s was of unexpected size %d bytes (expected %d), discarding", sender, len(encConvoMsg), expLen)
 				}
 
 				// Extract nonce used during encryption
@@ -746,14 +772,14 @@ func (mix *Mix) HandleBatchMsgs(connWrite quic.Stream, sender string) error {
 				copy(nonce[:], encConvoMsg[:24])
 
 				// Decrypt message content.
-				convoMsgRaw, ok := box.Open(nil, encConvoMsg[24:], nonce, pubKey, mix.RecvSecKey)
+				convoMsgRaw, ok := box.Open(nil, encConvoMsg[24:], nonce, pubKey, mix.CurRecvSecKey)
 				if !ok {
 					return err
 				}
 
-				// Unmarshal packed convo message from
-				// byte slice to Cap'n Proto message.
-				convoMsgProto, err := capnp.UnmarshalPacked(convoMsgRaw)
+				// Unmarshal convo message from byte
+				// slice to Cap'n Proto message.
+				convoMsgProto, err := capnp.Unmarshal(convoMsgRaw)
 				if err != nil {
 					return err
 				}
@@ -772,7 +798,7 @@ func (mix *Mix) HandleBatchMsgs(connWrite quic.Stream, sender string) error {
 				mix.muAddMsgs.Unlock()
 			}
 
-			fmt.Println("B")
+			fmt.Println("BATCH B")
 		}
 	}
 }
@@ -819,7 +845,7 @@ func (mix *Mix) RunRounds() {
 
 			default:
 
-				fmt.Println("A")
+				fmt.Println("ENTRY A")
 
 				// Wait for incoming connections on public socket.
 				session, err := mix.PubListener.Accept()
@@ -842,7 +868,7 @@ func (mix *Mix) RunRounds() {
 				// We handle them directly.
 				go mix.AddConvoMsg(connWrite, sender)
 
-				fmt.Println("B")
+				fmt.Println("ENTRY B")
 			}
 		}
 	} else {
