@@ -82,13 +82,17 @@ func GenPubTLSCertAndConf(listenFQDN string, listenIP string) (*tls.Config, []by
 			Organization: []string{"Zeno mix-net"},
 		},
 		NotBefore:             now,
-		NotAfter:              now.Add(24 * time.Hour),
+		NotAfter:              now.Add(10 * 24 * time.Hour),
 		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
 		IsCA:                  true,
-		DNSNames:              []string{listenFQDN},
 		IPAddresses:           []net.IP{net.ParseIP(listenIP)},
+	}
+
+	// Only specify an FQDN if supplied argument is not empty.
+	if listenFQDN != "" {
+		certTempl.DNSNames = []string{listenFQDN}
 	}
 
 	// Generate DER representation of certificate.

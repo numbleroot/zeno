@@ -21,10 +21,11 @@ func main() {
 	// Allow for and require various arguments.
 	isClientFlag := flag.Bool("client", false, "Append this flag on a node representing a client of the mix-net.")
 	isMixFlag := flag.Bool("mix", false, "Append this flag on a node intended for mix responsibilities (might still become regular client).")
-	pkiAddrFlag := flag.String("pki", "127.0.0.1:10001", "Provide ip:port address string of PKI for mix-net.")
+	msgPublicAddrFlag := flag.String("msgPublicAddr", "127.0.0.1:33000", "Specify on which ip:port address this node is going to be publicly addressable.")
+	msgLisAddrFlag := flag.String("msgLisAddr", "0.0.0.0:33000", "Specify on which ip:port address for this node to listen for messages.")
+	pkiLisAddrFlag := flag.String("pkiLisAddr", "0.0.0.0:44000", "Specify on which ip:port address for this node to listen for PKI information.")
+	pkiAddrFlag := flag.String("pki", "1.1.1.1:33000", "Provide ip:port address string of PKI for mix-net.")
 	pkiCertPathFlag := flag.String("pkiCertPath", filepath.Join(os.Getenv("GOPATH"), "src/github.com/numbleroot/zeno-pki/cert.pem"), "Specify file system path to PKI server TLS certificate.")
-	msgLisAddrFlag := flag.String("msgLisAddr", "", "Specify on which ip:port address for this node to listen for messages.")
-	pkiLisAddrFlag := flag.String("pkiLisAddr", "", "Specify on which ip:port address for this node to listen for PKI information.")
 
 	flag.Parse()
 
@@ -34,29 +35,17 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Require a listen address for messages to be set.
-	if *msgLisAddrFlag == "" {
-		fmt.Printf("Please specify on which ip:port address for this node to listen for messages.\n")
-		os.Exit(1)
-	}
-
-	// Require a listen address for information from
-	// PKI to be set.
-	if *pkiLisAddrFlag == "" {
-		fmt.Printf("Please specify on which ip:port address for this node to listen for PKI information.\n")
-		os.Exit(1)
-	}
-
 	isClient := *isClientFlag
 	isMix := *isMixFlag
-	pkiAddr := *pkiAddrFlag
-	pkiCertPath := *pkiCertPathFlag
+	msgPublicAddr := *msgPublicAddrFlag
 	msgLisAddr := *msgLisAddrFlag
 	pkiLisAddr := *pkiLisAddrFlag
+	pkiAddr := *pkiAddrFlag
+	pkiCertPath := *pkiCertPathFlag
 
 	// Generate ephemeral TLS certificate and config
 	// for PKI listener.
-	pkiTLSConfAsServer, pkiCertPEM, err := GenPubTLSCertAndConf("localhost", strings.Split(msgLisAddr, ":")[0])
+	pkiTLSConfAsServer, pkiCertPEM, err := GenPubTLSCertAndConf("", strings.Split(msgPublicAddr, ":")[0])
 	if err != nil {
 		fmt.Printf("Failed generating ephemeral TLS certificate and config for PKI listener: %v\n", err)
 		os.Exit(1)
