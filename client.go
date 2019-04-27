@@ -174,12 +174,10 @@ func OnionEncryptAndSend(retChan chan uint8, text []byte, recipient string, chai
 	}, nil)
 	if err != nil {
 
-		if err.Error() == "NO_ERROR" {
-			retChan <- 2
-			return
+		if err.Error() != "NO_ERROR" {
+			fmt.Printf("Failed connecting to entry mix %s via QUIC: %v\n", chain[0].Addr, err)
 		}
 
-		fmt.Printf("Failed connecting to entry mix %s via QUIC: %v\n", chain[0].Addr, err)
 		retChan <- 1
 		return
 	}
@@ -188,12 +186,10 @@ func OnionEncryptAndSend(retChan chan uint8, text []byte, recipient string, chai
 	stream, err := session.OpenStreamSync()
 	if err != nil {
 
-		if err.Error() == "NO_ERROR" {
-			retChan <- 3
-			return
+		if err.Error() != "NO_ERROR" {
+			fmt.Printf("Failed to upgrade QUIC session to stream: %v\n", err)
 		}
 
-		fmt.Printf("Failed to upgrade QUIC session to stream: %v\n", err)
 		retChan <- 1
 		return
 	}
@@ -204,7 +200,11 @@ func OnionEncryptAndSend(retChan chan uint8, text []byte, recipient string, chai
 	// Encode message in packed format and send it via stream.
 	err = capnp.NewPackedEncoder(stream).Encode(protoMsg)
 	if err != nil {
-		fmt.Printf("Failed to encode and send onion-encrypted message to entry mix %s: %v\n", chain[0].Addr, err)
+
+		if err.Error() != "NO_ERROR" {
+			fmt.Printf("Failed to encode and send onion-encrypted message to entry mix %s: %v\n", chain[0].Addr, err)
+		}
+
 		retChan <- 1
 		return
 	}
@@ -213,12 +213,10 @@ func OnionEncryptAndSend(retChan chan uint8, text []byte, recipient string, chai
 	statusRaw, err := connRead.ReadString('\n')
 	if err != nil {
 
-		if err.Error() == "NO_ERROR" {
-			retChan <- 4
-			return
+		if err.Error() != "NO_ERROR" {
+			fmt.Printf("Failed to receive response to delivery of conversation message: %v\n", err)
 		}
 
-		fmt.Printf("Failed to receive response to delivery of conversation message: %v\n", err)
 		retChan <- 1
 		return
 	}
@@ -254,7 +252,7 @@ func (cl *Client) SendMsg() {
 		// If not, return from function.
 		if !cl.IsClient {
 			cl.muUpdState.RUnlock()
-			return
+			break
 		}
 
 		// Deep-copy cascades matrix.
@@ -327,7 +325,7 @@ func (cl *Client) SendMsg() {
 		// Run message transmission in own routine
 		// with all relevant values passed explicitly.
 
-		fmt.Printf("Partner='%s', ConvoID='%s'\n", partner, convoID)
+		// fmt.Printf("Partner='%s', ConvoID='%s'\n", partner, convoID)
 
 		retChan := make(chan uint8)
 
@@ -343,7 +341,7 @@ func (cl *Client) SendMsg() {
 		for range cascadesMatrix {
 
 			retState = <-retChan
-			fmt.Printf("One sender routine returned: %d\n", retState)
+			// fmt.Printf("One sender routine returned: %d\n", retState)
 
 			if retState == 0 {
 				succeeded = true
@@ -353,12 +351,9 @@ func (cl *Client) SendMsg() {
 
 		go func(retChan chan uint8) {
 
-			for len(retChan) > 0 {
-				a := <-retChan
+			for a := range retChan {
 				fmt.Printf("~ draining channel: %d\n", a)
 			}
-
-			close(retChan)
 
 		}(retChan)
 
@@ -409,14 +404,22 @@ func (cl *Client) RunRounds() {
 			// Wait for incoming connections on public socket.
 			session, err := cl.PubListener.Accept()
 			if err != nil {
-				fmt.Printf("Public connection error: %v\n", err)
+
+				if err.Error() != "NO_ERROR" {
+					fmt.Printf("Public connection error: %v\n", err)
+				}
+
 				continue
 			}
 
 			// Upgrade session to stream.
 			connWrite, err := session.AcceptStream()
 			if err != nil {
-				fmt.Printf("Failed accepting incoming stream: %v\n", err)
+
+				if err.Error() != "NO_ERROR" {
+					fmt.Printf("Failed accepting incoming stream: %v\n", err)
+				}
+
 				continue
 			}
 			decoder := gob.NewDecoder(connWrite)
@@ -425,7 +428,11 @@ func (cl *Client) RunRounds() {
 			var msg []byte
 			err = decoder.Decode(&msg)
 			if err != nil {
-				fmt.Printf("Failed decoding incoming message as slice of bytes: %v\n", err)
+
+				if err.Error() != "NO_ERROR" {
+					fmt.Printf("Failed decoding incoming message as slice of bytes: %v\n", err)
+				}
+
 				continue
 			}
 

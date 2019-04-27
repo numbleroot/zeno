@@ -52,6 +52,8 @@ func (mix *Mix) SetOwnPlace() {
 			break
 		}
 	}
+
+	fmt.Printf("%s:  OwnChain=%v, OwnIndex=%v, IsEntry=%v, IsExit=%v\n", mix.PubLisAddr, mix.OwnChain, mix.OwnIndex, mix.IsEntry, mix.IsExit)
 }
 
 // ReconnectToSuccessor establishes a connection
@@ -60,16 +62,28 @@ func (mix *Mix) ReconnectToSuccessor() error {
 
 	if !mix.IsExit {
 
-		// Dial successor mix via TLS-over-QUIC.
-		session, err := quic.DialAddr(mix.CurCascadesMatrix[mix.OwnChain][(mix.OwnIndex+1)].Addr, &tls.Config{
-			RootCAs:            mix.CurCascadesMatrix[mix.OwnChain][(mix.OwnIndex + 1)].PubCertPool,
+		// Extract next-in-cascade mix.
+		successor := mix.CurCascadesMatrix[mix.OwnChain][(mix.OwnIndex + 1)]
+
+		// Prepare TLS config to use for QUIC.
+		tlsConf := &tls.Config{
+			RootCAs:            successor.PubCertPool,
 			InsecureSkipVerify: false,
 			MinVersion:         tls.VersionTLS13,
 			CurvePreferences:   []tls.CurveID{tls.X25519},
-		}, nil)
-		if err != nil {
-			return err
 		}
+
+		// Dial successor mix via TLS-over-QUIC.
+		session, err := quic.DialAddr(successor.Addr, tlsConf, nil)
+		for err != nil {
+
+			fmt.Printf("Reconnecting to successor failed with: %v\n", err)
+			fmt.Printf("Trying again...\n")
+
+			session, err = quic.DialAddr(successor.Addr, tlsConf, nil)
+		}
+
+		fmt.Printf("Success! Reconnected to %s!\n", successor.Addr)
 
 		// Upgrade session to blocking stream.
 		stream, err := session.OpenStreamSync()
@@ -343,24 +357,45 @@ func (mix *Mix) SendOutMsg(msgChan chan *rpc.ConvoMsg) {
 			CurvePreferences:   []tls.CurveID{tls.X25519},
 		}, nil)
 		if err != nil {
-			fmt.Printf("Could not connect to client %s via QUIC: %v\n", string(addr), err)
+
+			if err.Error() != "NO_ERROR" {
+				fmt.Printf("Could not connect to client %s via QUIC: %v\n", string(addr), err)
+			}
+
 			continue
 		}
 
 		// Upgrade session to blocking stream.
 		stream, err := session.OpenStreamSync()
 		if err != nil {
-			fmt.Printf("Failed to upgrade QUIC session to stream: %v\n", err)
+
+			if err.Error() != "NO_ERROR" {
+				fmt.Printf("Failed to upgrade QUIC session to stream: %v\n", err)
+			}
+
 			continue
 		}
 
 		encoder := gob.NewEncoder(stream)
 
-		// Send message content and close connection.
+		// Send message content.
 		err = encoder.Encode(msg)
 		if err != nil {
-			fmt.Printf("Failed sending message to client '%s': %v\n", addr, err)
+
+			if err.Error() != "NO_ERROR" {
+				fmt.Printf("Failed sending message to client %s: %v\n", addr, err)
+			}
+
 			continue
+		}
+
+		// Close connection to client.
+		err = stream.Close()
+		if err != nil {
+
+			if err.Error() != "NO_ERROR" {
+				fmt.Printf("Error while closing stream to %s: %v\n", addr, err)
+			}
 		}
 	}
 }
@@ -554,8 +589,11 @@ func (mix *Mix) RotateRoundState() {
 				// Encode message in packed mode and send it via stream.
 				err = capnp.NewPackedEncoder(mix.Successor).Encode(protoMsg)
 				if err != nil {
-					fmt.Printf("Rotating round state failed: %v\n", err)
-					os.Exit(1)
+
+					if err.Error() != "NO_ERROR" {
+						fmt.Printf("Rotating round state failed: %v\n", err)
+						os.Exit(1)
+					}
 				}
 			}
 
@@ -577,8 +615,10 @@ func (mix *Mix) AddConvoMsg(connWrite quic.Stream, sender string) {
 	encConvoMsgWire, err := capnp.NewPackedDecoder(connWrite).Decode()
 	if err != nil {
 
-		fmt.Printf("Error decoding packed message from client: %v\n", err)
-		fmt.Fprintf(connWrite, "1\n")
+		if err.Error() != "NO_ERROR" {
+			fmt.Printf("Error decoding packed message from client: %v\n", err)
+			fmt.Fprintf(connWrite, "1\n")
+		}
 
 		return
 	}
@@ -616,8 +656,6 @@ func (mix *Mix) AddConvoMsg(connWrite quic.Stream, sender string) {
 
 		return
 	}
-
-	fmt.Printf("len(encConvoMsg): %d\n", len(encConvoMsg))
 
 	// Calculate expected length of message.
 	expLen := MsgLength + ((LenCascade - 1) * MsgCascadeOverhead) + MsgExitOverhead
@@ -697,7 +735,7 @@ func (mix *Mix) HandleBatchMsgs(connWrite quic.Stream, sender string) error {
 	// Ensure only the predecessor mix is able to
 	// take up this mix node's compute ressources.
 	if sender != strings.Split(mix.CurCascadesMatrix[mix.OwnChain][(mix.OwnIndex-1)].Addr, ":")[0] {
-		return fmt.Errorf("node at '%s' tried to send a message batch but we expect predecessor '%s'", sender, mix.CurCascadesMatrix[mix.OwnChain][(mix.OwnIndex-1)].Addr)
+		return fmt.Errorf("node at %s tried to send a message batch but we expect predecessor %s", sender, mix.CurCascadesMatrix[mix.OwnChain][(mix.OwnIndex-1)].Addr)
 	}
 
 	for {
@@ -714,11 +752,14 @@ func (mix *Mix) HandleBatchMsgs(connWrite quic.Stream, sender string) error {
 
 		default:
 
-			fmt.Println("BATCH A")
-
 			// Decode message batch in packed format from stream.
 			batchProto, err := capnp.NewPackedDecoder(connWrite).Decode()
 			if err != nil {
+
+				if err.Error() == "NO_ERROR" {
+					return nil
+				}
+
 				return err
 			}
 
@@ -755,8 +796,6 @@ func (mix *Mix) HandleBatchMsgs(connWrite quic.Stream, sender string) error {
 				if err != nil {
 					return err
 				}
-
-				fmt.Printf("len(encConvoMsg): %d\n", len(encConvoMsg))
 
 				// Calculate expected length of message.
 				expLen := MsgLength + ((LenCascade - mix.OwnIndex - 1) * MsgCascadeOverhead) + MsgExitOverhead
@@ -797,8 +836,6 @@ func (mix *Mix) HandleBatchMsgs(connWrite quic.Stream, sender string) error {
 				mix.FirstPool = append(mix.FirstPool, &convoMsg)
 				mix.muAddMsgs.Unlock()
 			}
-
-			fmt.Println("BATCH B")
 		}
 	}
 }
@@ -845,8 +882,6 @@ func (mix *Mix) RunRounds() {
 
 			default:
 
-				fmt.Println("ENTRY A")
-
 				// Wait for incoming connections on public socket.
 				session, err := mix.PubListener.Accept()
 				if err != nil {
@@ -867,8 +902,6 @@ func (mix *Mix) RunRounds() {
 				// conversation messages from clients.
 				// We handle them directly.
 				go mix.AddConvoMsg(connWrite, sender)
-
-				fmt.Println("ENTRY B")
 			}
 		}
 	} else {
