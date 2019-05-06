@@ -89,14 +89,18 @@ type Node struct {
 	CurClientsByAddress    map[string]int
 	NextClients            []*Endpoint
 	NextClientsByAddress   map[string]int
+	IsEval                 bool
 }
 
 // Client represents a client node in
 // our system architecture.
 type Client struct {
 	*Node
-	muUpdState *sync.RWMutex
-	IsClient   bool
+	muUpdState   *sync.RWMutex
+	IsClient     bool
+	NumMsgToRecv int
+	EvalSendChan chan string
+	EvalRecvChan chan string
 }
 
 // Mix represents a mix node in our
@@ -116,4 +120,12 @@ type Mix struct {
 	ThirdPool   []*rpc.ConvoMsg
 	NextPool    []*rpc.ConvoMsg
 	OutPool     []*rpc.ConvoMsg
+}
+
+// ClientSendResult is used by the sending
+// goroutines in clients when returning the
+// response and time measurement back to caller.
+type ClientSendResult struct {
+	Status uint8
+	Time   int64
 }

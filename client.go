@@ -68,14 +68,14 @@ func InitNewRound(cascadesMatrix [][]*FlatEndpoint) ([][]*OnionKeyState, error) 
 // A client uses this function to reverse-encrypt
 // a message for the assigned chain and send it off
 // to each respective entry mix.
-func OnionEncryptAndSend(retChan chan uint8, text []byte, recipient string, chain []*FlatEndpoint, keyState []*OnionKeyState) {
+func OnionEncryptAndSend(retChan chan *ClientSendResult, text []byte, recipient string, chain []*FlatEndpoint, keyState []*OnionKeyState) {
 
 	// Pad random message to fixed length.
 	msgPadded := make([]byte, MsgLength)
 	_, err := io.ReadFull(rand.Reader, msgPadded)
 	if err != nil {
 		fmt.Printf("Failed to prepare random padded message: %v\n", err)
-		retChan <- 1
+		retChan <- &ClientSendResult{Status: 1, Time: -1}
 		return
 	}
 	copy(msgPadded[:], text)
@@ -84,7 +84,7 @@ func OnionEncryptAndSend(retChan chan uint8, text []byte, recipient string, chai
 	protoMsg, protoMsgSeg, err := capnp.NewMessage(capnp.SingleSegment(nil))
 	if err != nil {
 		fmt.Printf("Failed creating empty Cap'n Proto message: %v\n", err)
-		retChan <- 1
+		retChan <- &ClientSendResult{Status: 1, Time: -1}
 		return
 	}
 
@@ -92,7 +92,7 @@ func OnionEncryptAndSend(retChan chan uint8, text []byte, recipient string, chai
 	convoMsg, err := rpc.NewRootConvoMsg(protoMsgSeg)
 	if err != nil {
 		fmt.Printf("Failed creating new root ConvoMsg: %v\n", err)
-		retChan <- 1
+		retChan <- &ClientSendResult{Status: 1, Time: -1}
 		return
 	}
 	convoMsg.SetPubKeyOrAddr([]byte(recipient))
@@ -102,7 +102,7 @@ func OnionEncryptAndSend(retChan chan uint8, text []byte, recipient string, chai
 	msg, err := protoMsg.Marshal()
 	if err != nil {
 		fmt.Printf("Failed marshalling ConvoMsg to []byte: %v\n", err)
-		retChan <- 1
+		retChan <- &ClientSendResult{Status: 1, Time: -1}
 		return
 	}
 
@@ -119,7 +119,7 @@ func OnionEncryptAndSend(retChan chan uint8, text []byte, recipient string, chai
 		protoMsg, protoMsgSeg, err := capnp.NewMessage(capnp.SingleSegment(nil))
 		if err != nil {
 			fmt.Printf("Failed creating empty Cap'n Proto message: %v\n", err)
-			retChan <- 1
+			retChan <- &ClientSendResult{Status: 1, Time: -1}
 			return
 		}
 
@@ -127,7 +127,7 @@ func OnionEncryptAndSend(retChan chan uint8, text []byte, recipient string, chai
 		onionMsg, err := rpc.NewRootConvoMsg(protoMsgSeg)
 		if err != nil {
 			fmt.Printf("Failed creating new root ConvoMsg: %v\n", err)
-			retChan <- 1
+			retChan <- &ClientSendResult{Status: 1, Time: -1}
 			return
 		}
 		onionMsg.SetPubKeyOrAddr(keyState[mix].PubKey[:])
@@ -137,7 +137,7 @@ func OnionEncryptAndSend(retChan chan uint8, text []byte, recipient string, chai
 		msg, err = protoMsg.Marshal()
 		if err != nil {
 			fmt.Printf("Failed marshalling ConvoMsg to []byte: %v\n", err)
-			retChan <- 1
+			retChan <- &ClientSendResult{Status: 1, Time: -1}
 			return
 		}
 	}
@@ -150,7 +150,7 @@ func OnionEncryptAndSend(retChan chan uint8, text []byte, recipient string, chai
 	protoMsg, protoMsgSeg, err = capnp.NewMessage(capnp.SingleSegment(nil))
 	if err != nil {
 		fmt.Printf("Failed creating empty Cap'n Proto message: %v\n", err)
-		retChan <- 1
+		retChan <- &ClientSendResult{Status: 1, Time: -1}
 		return
 	}
 
@@ -158,7 +158,7 @@ func OnionEncryptAndSend(retChan chan uint8, text []byte, recipient string, chai
 	onionMsg, err := rpc.NewRootConvoMsg(protoMsgSeg)
 	if err != nil {
 		fmt.Printf("Failed creating new root ConvoMsg: %v\n", err)
-		retChan <- 1
+		retChan <- &ClientSendResult{Status: 1, Time: -1}
 		return
 	}
 	onionMsg.SetPubKeyOrAddr(keyState[0].PubKey[:])
@@ -178,7 +178,7 @@ func OnionEncryptAndSend(retChan chan uint8, text []byte, recipient string, chai
 			fmt.Printf("Failed connecting to entry mix %s via QUIC: %v\n", chain[0].Addr, err)
 		}
 
-		retChan <- 1
+		retChan <- &ClientSendResult{Status: 1, Time: -1}
 		return
 	}
 
@@ -190,7 +190,7 @@ func OnionEncryptAndSend(retChan chan uint8, text []byte, recipient string, chai
 			fmt.Printf("Failed to upgrade QUIC session to stream: %v\n", err)
 		}
 
-		retChan <- 1
+		retChan <- &ClientSendResult{Status: 1, Time: -1}
 		return
 	}
 
@@ -205,9 +205,12 @@ func OnionEncryptAndSend(retChan chan uint8, text []byte, recipient string, chai
 			fmt.Printf("Failed to encode and send onion-encrypted message to entry mix %s: %v\n", chain[0].Addr, err)
 		}
 
-		retChan <- 1
+		retChan <- &ClientSendResult{Status: 1, Time: -1}
 		return
 	}
+
+	// Save send time.
+	sendTime := time.Now().UnixNano()
 
 	// Wait for acknowledgement.
 	statusRaw, err := connRead.ReadString('\n')
@@ -217,7 +220,7 @@ func OnionEncryptAndSend(retChan chan uint8, text []byte, recipient string, chai
 			fmt.Printf("Failed to receive response to delivery of conversation message: %v\n", err)
 		}
 
-		retChan <- 1
+		retChan <- &ClientSendResult{Status: 1, Time: -1}
 		return
 	}
 
@@ -225,11 +228,11 @@ func OnionEncryptAndSend(retChan chan uint8, text []byte, recipient string, chai
 	status, err := strconv.ParseUint(strings.ToLower(strings.Trim(statusRaw, "\n ")), 10, 8)
 	if err != nil {
 		fmt.Printf("Converting response from entry mix to number failed: %v\n", err)
-		retChan <- 1
+		retChan <- &ClientSendResult{Status: 1, Time: -1}
 		return
 	}
 
-	retChan <- uint8(status)
+	retChan <- &ClientSendResult{Status: uint8(status), Time: sendTime}
 }
 
 // SendMsg is the main user input loop on a
@@ -285,10 +288,10 @@ func (cl *Client) SendMsg() {
 				// is the preceding client.
 				if (i % 2) == 0 {
 					partner = cl.CurClients[(i + 1)].Addr
-					convoID = fmt.Sprintf("%06d => %06d;", i, (i + 1))
+					convoID = fmt.Sprintf("%06d=>%06d", i, (i + 1))
 				} else {
 					partner = cl.CurClients[(i - 1)].Addr
-					convoID = fmt.Sprintf("%06d => %06d;", i, (i - 1))
+					convoID = fmt.Sprintf("%06d=>%06d", i, (i - 1))
 				}
 			}
 		}
@@ -313,21 +316,16 @@ func (cl *Client) SendMsg() {
 			os.Exit(1)
 		}
 
-		// First 17 bytes will be conversation ID.
+		// First 14 bytes will be conversation ID.
 		copy(msg[:], convoID)
 
-		// Bytes 18 - 23 are the message sequence number.
-		copy(msg[17:], fmt.Sprintf("%05d;", msgID))
+		// Bytes 15 - 20 are the message sequence number.
+		copy(msg[14:], fmt.Sprintf("%06d", msgID))
 
-		// Bytes 24 - MsgLength are the actual message.
-		copy(msg[23:], Msg)
+		// Bytes 21 - MsgLength are the actual message.
+		copy(msg[20:], Msg)
 
-		// Run message transmission in own routine
-		// with all relevant values passed explicitly.
-
-		// fmt.Printf("Partner='%s', ConvoID='%s'\n", partner, convoID)
-
-		retChan := make(chan uint8)
+		retChan := make(chan *ClientSendResult)
 
 		// In parallel, reverse onion-encrypt the
 		// message and send to all entry mixes.
@@ -336,23 +334,24 @@ func (cl *Client) SendMsg() {
 		}
 
 		succeeded := false
-		var retState uint8 = 255
+		var retState = &ClientSendResult{}
 
 		for range cascadesMatrix {
 
+			// Collect results from the individual goroutines
+			// sending out the message to each entry mix.
 			retState = <-retChan
-			// fmt.Printf("One sender routine returned: %d\n", retState)
-
-			if retState == 0 {
+			if retState.Status == 0 {
 				succeeded = true
 				break
 			}
 		}
 
-		go func(retChan chan uint8) {
+		go func(retChan chan *ClientSendResult) {
 
-			for a := range retChan {
-				fmt.Printf("~ draining channel: %d\n", a)
+			// Drain result state channel, such that
+			// it can be used in the next loop iteration.
+			for range retChan {
 			}
 
 		}(retChan)
@@ -360,13 +359,27 @@ func (cl *Client) SendMsg() {
 		if succeeded {
 
 			if isSecTransmission {
+
+				// Increment message counter and reset
+				// flag for redundant transmission.
 				msgID++
+				isSecTransmission = false
+
 			} else {
+
+				// If the first transmission was successful,
+				// send message a second time (same msgID).
 				isSecTransmission = true
+
+				// In case we are evaluating this client, send
+				// the measurement line to file writing goroutine.
+				if cl.IsEval {
+					cl.EvalSendChan <- fmt.Sprintf("%s %d\n", msg[:20], retState.Time)
+				}
 			}
 		}
 
-		if retState == 0 || retState == 2 {
+		if retState.Status == 0 || retState.Status == 2 {
 			time.Sleep(((RoundTime) / 5))
 		} else {
 			time.Sleep(((RoundTime) / 15))
@@ -436,18 +449,35 @@ func (cl *Client) RunRounds() {
 				continue
 			}
 
+			// Save receive time.
+			recvTime := time.Now().UnixNano()
+
 			// Do not consider cover traffic messages.
 			if !bytes.Equal(msg[0:28], []byte("COVER MESSAGE PLEASE DISCARD")) {
 
 				// Check dedup map for previous encounter.
-				_, seenBefore := recvdMsgs[string(msg[:23])]
+				_, seenBefore := recvdMsgs[string(msg[:20])]
 				if !seenBefore {
 
 					// Update message tracker.
-					recvdMsgs[string(msg[:23])] = true
+					recvdMsgs[string(msg[:20])] = true
 
 					// Finally, print received message.
-					fmt.Printf("\n@%s> %s\n", msg[17:22], msg[23:])
+					fmt.Printf("\n@%s> %s\n", msg[14:20], msg[20:])
+
+					// Send prepared measurement log line to
+					// file writing goroutine.
+					if cl.IsEval {
+						cl.EvalRecvChan <- fmt.Sprintf("%s %d\n", string(msg[:20]), recvTime)
+					}
+
+					// When we hit the number of messages to
+					// receive that was specified, wait and exit.
+					if len(recvdMsgs) == cl.NumMsgToRecv {
+						fmt.Printf("Number of messages to receive reached, exiting.\n")
+						time.Sleep(2 * time.Second)
+						os.Exit(0)
+					}
 				}
 			}
 		}
