@@ -24,7 +24,7 @@ import (
 // node of this system under at the PKI, 0 signals
 // 'node wants to be a mix', 1 signals 'node is a
 // client'. It transmit relevant node and connection
-// information via TLS to the PKI server.
+// information via TLS-over-QUIC to the PKI server.
 func (node *Node) RegisterAtPKI(category uint8) error {
 
 	var resp string
@@ -92,7 +92,10 @@ func (node *Node) RegisterAtPKI(category uint8) error {
 // shared cascades matrix at the end.
 func (node *Node) ElectMixes(data []string) error {
 
-	mockVDFTicker := time.NewTicker(1 * EpochBrick)
+	// This ticker corresponds to the second
+	// time period of the PKI (mock: set to
+	// second time period - 1 brick).
+	mockVDFTicker := time.NewTicker(3 * EpochBrick)
 
 	// Parse list of addresses and public keys
 	// received from PKI into candidates slice.
@@ -402,7 +405,7 @@ func (node *Node) PrepareNextEpoch(isMix bool, isClient bool) (bool, error) {
 
 	// Generate ephemeral TLS certificate and config
 	// for public listener.
-	pubTLSConfAsServer, pubCertPEM, err := GenPubTLSCertAndConf("localhost", strings.Split(node.PubLisAddr, ":")[0])
+	pubTLSConfAsServer, pubCertPEM, err := GenPubTLSCertAndConf("", strings.Split(node.PubLisAddr, ":")[0])
 	if err != nil {
 		return false, fmt.Errorf("failed generating ephemeral TLS certificate and config: %v", err)
 	}
@@ -475,7 +478,7 @@ func (node *Node) PrepareNextEpoch(isMix bool, isClient bool) (bool, error) {
 		}
 	}
 
-	fmt.Printf("\nMixes determined, waiting for clients to be broadcast\n")
+	fmt.Printf("\nMixes determined, waiting for clients to be broadcast.\n")
 
 	// Wait for signal that set of clients for
 	// upcoming epoch has been received and parsed.

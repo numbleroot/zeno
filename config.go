@@ -19,16 +19,16 @@ const BatchSizeVariance = 5
 // NumCascades defines the number of
 // distinct cascades that make up the
 // cascades matrix.
-const NumCascades = 2
+const NumCascades = 1
 
 // LenCascade defines the number of mixes
 // required to form one mix cascade.
-const LenCascade = 3
+const LenCascade = 7
 
 // MsgLength defines the number of bytes
 // the conversation messages will have
 // in their original form.
-const MsgLength = 360
+const MsgLength = 256
 
 // MsgExitOverhead defines the number of
 // additional bytes for a conversation

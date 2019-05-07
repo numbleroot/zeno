@@ -547,8 +547,8 @@ func (mix *Mix) RotateRoundState() {
 
 				// Prepare parallel sending of outgoing
 				// messages to clients.
-				msgChan := make(chan *rpc.ConvoMsg, 10000)
-				for i := 0; i < 10000; i++ {
+				msgChan := make(chan *rpc.ConvoMsg, 500)
+				for i := 0; i < 500; i++ {
 					go mix.SendOutMsg(msgChan)
 				}
 
