@@ -49,7 +49,10 @@ func main() {
 
 	// Generate ephemeral TLS certificate and config
 	// for PKI listener.
-	pkiTLSConfAsServer, pkiCertPEM, err := GenPubTLSCertAndConf("", strings.Split(msgPublicAddr, ":")[0])
+	pkiTLSConfAsServer, pkiCertPEM, err := GenPubTLSCertAndConf("", []string{
+		strings.Split(msgPublicAddr, ":")[0],
+		strings.Split(pkiLisAddr, ":")[0],
+	})
 	if err != nil {
 		fmt.Printf("Failed generating ephemeral TLS certificate and config for PKI listener: %v\n", err)
 		os.Exit(1)

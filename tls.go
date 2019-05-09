@@ -52,7 +52,7 @@ func GenPKITLSConf(certPath string) (*tls.Config, error) {
 // and the PEM-encoded certificate are returned.
 // This function takes heavy inspiration from:
 // https://golang.org/src/crypto/tls/generate_cert.go
-func GenPubTLSCertAndConf(listenFQDN string, listenIP string) (*tls.Config, []byte, error) {
+func GenPubTLSCertAndConf(listenFQDN string, listenIPs []string) (*tls.Config, []byte, error) {
 
 	now := time.Now()
 
@@ -87,7 +87,17 @@ func GenPubTLSCertAndConf(listenFQDN string, listenIP string) (*tls.Config, []by
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
 		IsCA:                  true,
-		IPAddresses:           []net.IP{net.ParseIP(listenIP)},
+	}
+
+	// Ensure IPs are only added once.
+	listenIPsMap := make(map[string]bool)
+	for i := range listenIPs {
+		listenIPsMap[listenIPs[i]] = true
+	}
+
+	// Parse and add all supplied IP addresses.
+	for ip := range listenIPsMap {
+		certTempl.IPAddresses = append(certTempl.IPAddresses, net.ParseIP(ip))
 	}
 
 	// Only specify an FQDN if supplied argument is not empty.

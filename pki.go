@@ -405,7 +405,10 @@ func (node *Node) PrepareNextEpoch(isMix bool, isClient bool) (bool, error) {
 
 	// Generate ephemeral TLS certificate and config
 	// for public listener.
-	pubTLSConfAsServer, pubCertPEM, err := GenPubTLSCertAndConf("", strings.Split(node.PubLisAddr, ":")[0])
+	pubTLSConfAsServer, pubCertPEM, err := GenPubTLSCertAndConf("", []string{
+		strings.Split(node.PubLisAddr, ":")[0],
+		strings.Split(node.PKILisAddr, ":")[0],
+	})
 	if err != nil {
 		return false, fmt.Errorf("failed generating ephemeral TLS certificate and config: %v", err)
 	}
