@@ -26,8 +26,9 @@ func main() {
 	pkiLisAddrFlag := flag.String("pkiLisAddr", "0.0.0.0:44000", "Specify on which ip:port address for this node to listen for PKI information.")
 	pkiAddrFlag := flag.String("pki", "1.1.1.1:33000", "Provide ip:port address string of PKI for mix-net.")
 	pkiCertPathFlag := flag.String("pkiCertPath", filepath.Join(os.Getenv("GOPATH"), "src/github.com/numbleroot/zeno-pki/cert.pem"), "Specify file system path to PKI server TLS certificate.")
+	isEvalFlag := flag.Bool("eval", false, "Append this flag to write evaluation output to files '/tmp/zeno_client_send.evaluation' and '/tmp/zeno_client_recv.evaluation'")
 	numMsgToRecvFlag := flag.Int("numMsgToRecv", -1, "Specify how many messages a '-client' is supposed to receive before exiting, -1 disables this limit.")
-	isEvalFlag := flag.Bool("eval", false, "Append this flag to write evaluation output to files '~/zeno_send.log' and '~/zeno_receive.log'")
+	metricsPipeFlag := flag.String("metricsPipe", "/tmp/collect", "Specify the named pipe to use for IPC with the collector sidecar.")
 
 	flag.Parse()
 
@@ -44,8 +45,9 @@ func main() {
 	pkiLisAddr := *pkiLisAddrFlag
 	pkiAddr := *pkiAddrFlag
 	pkiCertPath := *pkiCertPathFlag
-	numMsgToRecv := *numMsgToRecvFlag
 	isEval := *isEvalFlag
+	numMsgToRecv := *numMsgToRecvFlag
+	metricsPipe := *metricsPipeFlag
 
 	// Generate ephemeral TLS certificate and config
 	// for PKI listener.
@@ -80,6 +82,17 @@ func main() {
 		IsEval:             isEval,
 	}
 
+	if node.IsEval {
+
+		// Open named pipe for sending metrics to collector.
+		pipe, err := os.OpenFile(metricsPipe, os.O_WRONLY, 0600)
+		if err != nil {
+			fmt.Printf("Unable to open named pipe for sending metrics to collector: %v\n", err)
+			os.Exit(1)
+		}
+		node.MetricsPipe = pipe
+	}
+
 	// Open up socket for eventual cascades matrix
 	// election data from PKI.
 	node.PKIListener, err = quic.ListenAddr(node.PKILisAddr, node.PKITLSConfAsServer, nil)
@@ -100,49 +113,6 @@ func main() {
 		Node:         node,
 		muUpdState:   &sync.RWMutex{},
 		NumMsgToRecv: numMsgToRecv,
-	}
-
-	if client.IsEval {
-
-		// In case we are evaluating this node,
-		// create channels for the file writing
-		// goroutines to receive measurements on.
-		client.EvalSendChan = make(chan string, 50)
-		client.EvalRecvChan = make(chan string, 50)
-
-		go func(logs chan string) {
-
-			// Open an append-only, synchronized file.
-			evalFile, err := os.OpenFile("zeno_send.log", (os.O_APPEND | os.O_CREATE | os.O_TRUNC | os.O_WRONLY), 0644)
-			if err != nil {
-				fmt.Printf("Unable to create send measurements file '~/zeno_send.log': %v\n", err)
-				os.Exit(1)
-			}
-
-			// Write every measurement into file.
-			for log := range logs {
-				fmt.Fprint(evalFile, log)
-				_ = evalFile.Sync()
-			}
-
-		}(client.EvalSendChan)
-
-		go func(logs chan string) {
-
-			// Open an append-only, synchronized file.
-			evalFile, err := os.OpenFile("zeno_recv.log", (os.O_APPEND | os.O_CREATE | os.O_TRUNC | os.O_WRONLY), 0644)
-			if err != nil {
-				fmt.Printf("Unable to create recv measurements file '~/zeno_recv.log': %v\n", err)
-				os.Exit(1)
-			}
-
-			// Write every measurement into file.
-			for log := range logs {
-				fmt.Fprint(evalFile, log)
-				_ = evalFile.Sync()
-			}
-
-		}(client.EvalRecvChan)
 	}
 
 	// Prepare the upcoming epoch by electing

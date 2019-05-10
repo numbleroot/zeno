@@ -372,9 +372,9 @@ func (cl *Client) SendMsg() {
 				isSecTransmission = true
 
 				// In case we are evaluating this client, send
-				// the measurement line to file writing goroutine.
+				// the measurement line to collector sidecar.
 				if cl.IsEval {
-					cl.EvalSendChan <- fmt.Sprintf("%s %d\n", msg[:20], retState.Time)
+					fmt.Fprintf(cl.MetricsPipe, "send;%s %d\n", msg[:20], retState.Time)
 				}
 			}
 		}
@@ -466,15 +466,16 @@ func (cl *Client) RunRounds() {
 					fmt.Printf("\n@%s> %s\n", msg[14:20], msg[20:])
 
 					// Send prepared measurement log line to
-					// file writing goroutine.
+					// collector sidecar.
 					if cl.IsEval {
-						cl.EvalRecvChan <- fmt.Sprintf("%s %d\n", string(msg[:20]), recvTime)
+						fmt.Fprintf(cl.MetricsPipe, "recv;%s %d\n", string(msg[:20]), recvTime)
 					}
 
 					// When we hit the number of messages to
 					// receive that was specified, wait and exit.
 					if len(recvdMsgs) == cl.NumMsgToRecv {
 						fmt.Printf("Number of messages to receive reached, exiting.\n")
+						fmt.Fprint(cl.MetricsPipe, "done")
 						time.Sleep(2 * time.Second)
 						os.Exit(0)
 					}

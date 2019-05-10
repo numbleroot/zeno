@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"os"
 	"sync"
 	"time"
 
@@ -90,6 +91,7 @@ type Node struct {
 	NextClients            []*Endpoint
 	NextClientsByAddress   map[string]int
 	IsEval                 bool
+	MetricsPipe            *os.File
 }
 
 // Client represents a client node in
@@ -99,8 +101,6 @@ type Client struct {
 	muUpdState   *sync.RWMutex
 	IsClient     bool
 	NumMsgToRecv int
-	EvalSendChan chan string
-	EvalRecvChan chan string
 }
 
 // Mix represents a mix node in our

@@ -439,6 +439,12 @@ func (mix *Mix) RotateRoundState() {
 			// Acquire lock on first pool.
 			mix.muAddMsgs.Lock()
 
+			if mix.IsEval {
+				// If we are conducting an evaluation,
+				// send pool sizes to collector sidecar.
+				fmt.Fprintf(mix.MetricsPipe, "1st:%d 2nd:%d 3rd:%d out:%d\n", len(mix.FirstPool), len(mix.SecPool), len(mix.ThirdPool), len(mix.OutPool))
+			}
+
 			// Reset participation tracking map.
 			mix.ClientsSeen = make(map[string]bool)
 
