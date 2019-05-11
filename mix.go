@@ -120,6 +120,15 @@ func (mix *Mix) AddCoverMsgsToPool(initFirst bool, numClients int, numSamples in
 		}
 		chosen := int(chosenBig.Int64())
 
+		// Pad recipient to fixed length.
+		recipientPadded := make([]byte, 21)
+		_, err = io.ReadFull(rand.Reader, recipientPadded)
+		if err != nil {
+			return err
+		}
+		copy(recipientPadded[:], mix.CurClients[chosen].Addr)
+		recipientPadded[len(mix.CurClients[chosen].Addr)] = '#'
+
 		// Prepare cover message.
 		msgPadded := make([]byte, MsgLength)
 		_, err = io.ReadFull(rand.Reader, msgPadded)
@@ -139,7 +148,7 @@ func (mix *Mix) AddCoverMsgsToPool(initFirst bool, numClients int, numSamples in
 		if err != nil {
 			return err
 		}
-		convoExitMsg.SetPubKeyOrAddr([]byte(mix.CurClients[chosen].Addr))
+		convoExitMsg.SetPubKeyOrAddr(recipientPadded)
 		convoExitMsg.SetContent(msgPadded[:])
 
 		if mix.IsExit {
@@ -328,14 +337,15 @@ func (mix *Mix) SendOutMsg(msgChan chan *rpc.ConvoMsg) {
 	for exitMsg := range msgChan {
 
 		// Extract network address of outside client.
-		addr, err := exitMsg.PubKeyOrAddr()
+		addrRaw, err := exitMsg.PubKeyOrAddr()
 		if err != nil {
 			fmt.Printf("Failed to extract client address of outgoing message: %v\n", err)
 			continue
 		}
+		addrParts := strings.Split(string(addrRaw), "#")
 
 		// Find local endpoint mapped to address.
-		clIdx, found := mix.CurClientsByAddress[string(addr)]
+		clIdx, found := mix.CurClientsByAddress[addrParts[0]]
 		if !found {
 			fmt.Printf("Client to contact not known (no TLS certificate available).\n")
 			continue
@@ -350,7 +360,7 @@ func (mix *Mix) SendOutMsg(msgChan chan *rpc.ConvoMsg) {
 		}
 
 		// Connect to client node.
-		session, err := quic.DialAddr(string(addr), &tls.Config{
+		session, err := quic.DialAddr(addrParts[0], &tls.Config{
 			RootCAs:            client.PubCertPool,
 			InsecureSkipVerify: false,
 			MinVersion:         tls.VersionTLS13,
@@ -359,7 +369,7 @@ func (mix *Mix) SendOutMsg(msgChan chan *rpc.ConvoMsg) {
 		if err != nil {
 
 			if err.Error() != "NO_ERROR" {
-				fmt.Printf("Could not connect to client %s via QUIC: %v\n", string(addr), err)
+				fmt.Printf("Could not connect to client %s via QUIC: %v\n", addrParts[0], err)
 			}
 
 			continue
@@ -383,7 +393,7 @@ func (mix *Mix) SendOutMsg(msgChan chan *rpc.ConvoMsg) {
 		if err != nil {
 
 			if err.Error() != "NO_ERROR" {
-				fmt.Printf("Failed sending message to client %s: %v\n", addr, err)
+				fmt.Printf("Failed sending message to client %s: %v\n", addrParts[0], err)
 			}
 
 			continue
@@ -394,7 +404,7 @@ func (mix *Mix) SendOutMsg(msgChan chan *rpc.ConvoMsg) {
 		if err != nil {
 
 			if err.Error() != "NO_ERROR" {
-				fmt.Printf("Error while closing stream to %s: %v\n", addr, err)
+				fmt.Printf("Error while closing stream to %s: %v\n", addrParts[0], err)
 			}
 		}
 	}
@@ -592,8 +602,8 @@ func (mix *Mix) RotateRoundState() {
 					msgs.Set(i, *mix.OutPool[i])
 				}
 
-				// Encode message in packed mode and send it via stream.
-				err = capnp.NewPackedEncoder(mix.Successor).Encode(protoMsg)
+				// Encode message and send it via stream.
+				err = capnp.NewEncoder(mix.Successor).Encode(protoMsg)
 				if err != nil {
 
 					if err.Error() != "NO_ERROR" {
@@ -617,12 +627,12 @@ func (mix *Mix) RotateRoundState() {
 // a conversation message to an entry mix.
 func (mix *Mix) AddConvoMsg(connWrite quic.Stream, sender string) {
 
-	// Decode message in packed format from stream.
-	encConvoMsgWire, err := capnp.NewPackedDecoder(connWrite).Decode()
+	// Decode message from stream.
+	encConvoMsgWire, err := capnp.NewDecoder(connWrite).Decode()
 	if err != nil {
 
 		if err.Error() != "NO_ERROR" {
-			fmt.Printf("Error decoding packed message from client: %v\n", err)
+			fmt.Printf("Error decoding message from client: %v\n", err)
 			fmt.Fprintf(connWrite, "1\n")
 		}
 
@@ -758,8 +768,8 @@ func (mix *Mix) HandleBatchMsgs(connWrite quic.Stream, sender string) error {
 
 		default:
 
-			// Decode message batch in packed format from stream.
-			batchProto, err := capnp.NewPackedDecoder(connWrite).Decode()
+			// Decode message batch from stream.
+			batchProto, err := capnp.NewDecoder(connWrite).Decode()
 			if err != nil {
 
 				if err.Error() == "NO_ERROR" {

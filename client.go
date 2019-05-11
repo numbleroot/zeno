@@ -70,9 +70,20 @@ func InitNewRound(cascadesMatrix [][]*FlatEndpoint) ([][]*OnionKeyState, error) 
 // to each respective entry mix.
 func OnionEncryptAndSend(retChan chan *ClientSendResult, text []byte, recipient string, chain []*FlatEndpoint, keyState []*OnionKeyState) {
 
+	// Pad recipient to fixed length.
+	recipientPadded := make([]byte, 21)
+	_, err := io.ReadFull(rand.Reader, recipientPadded)
+	if err != nil {
+		fmt.Printf("Failed to prepare random padded recipient: %v\n", err)
+		retChan <- &ClientSendResult{Status: 1, Time: -1}
+		return
+	}
+	copy(recipientPadded[:], recipient)
+	recipientPadded[len(recipient)] = '#'
+
 	// Pad random message to fixed length.
 	msgPadded := make([]byte, MsgLength)
-	_, err := io.ReadFull(rand.Reader, msgPadded)
+	_, err = io.ReadFull(rand.Reader, msgPadded)
 	if err != nil {
 		fmt.Printf("Failed to prepare random padded message: %v\n", err)
 		retChan <- &ClientSendResult{Status: 1, Time: -1}
@@ -95,7 +106,7 @@ func OnionEncryptAndSend(retChan chan *ClientSendResult, text []byte, recipient 
 		retChan <- &ClientSendResult{Status: 1, Time: -1}
 		return
 	}
-	convoMsg.SetPubKeyOrAddr([]byte(recipient))
+	convoMsg.SetPubKeyOrAddr(recipientPadded)
 	convoMsg.SetContent(msgPadded[:])
 
 	// Marshal final convoMsg to byte slice.
@@ -197,8 +208,8 @@ func OnionEncryptAndSend(retChan chan *ClientSendResult, text []byte, recipient 
 	// Create buffered I/O reader from connection.
 	connRead := bufio.NewReader(stream)
 
-	// Encode message in packed format and send it via stream.
-	err = capnp.NewPackedEncoder(stream).Encode(protoMsg)
+	// Encode message and send it via stream.
+	err = capnp.NewEncoder(stream).Encode(protoMsg)
 	if err != nil {
 
 		if err.Error() != "NO_ERROR" {
