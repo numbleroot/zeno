@@ -71,7 +71,7 @@ func InitNewRound(cascadesMatrix [][]*FlatEndpoint) ([][]*OnionKeyState, error) 
 func OnionEncryptAndSend(retChan chan *ClientSendResult, text []byte, recipient string, chain []*FlatEndpoint, keyState []*OnionKeyState) {
 
 	// Pad recipient to fixed length.
-	recipientPadded := make([]byte, 21)
+	recipientPadded := make([]byte, 32)
 	_, err := io.ReadFull(rand.Reader, recipientPadded)
 	if err != nil {
 		fmt.Printf("Failed to prepare random padded recipient: %v\n", err)
@@ -385,7 +385,7 @@ func (cl *Client) SendMsg() {
 				// In case we are evaluating this client, send
 				// the measurement line to collector sidecar.
 				if cl.IsEval {
-					fmt.Fprintf(cl.MetricsPipe, "send;%s %d\n", msg[:20], retState.Time)
+					fmt.Fprintf(cl.MetricsPipe, "send;%d %s %s\n", retState.Time, msg[:14], msg[14:20])
 				}
 			}
 		}
@@ -479,14 +479,14 @@ func (cl *Client) RunRounds() {
 					// Send prepared measurement log line to
 					// collector sidecar.
 					if cl.IsEval {
-						fmt.Fprintf(cl.MetricsPipe, "recv;%s %d\n", string(msg[:20]), recvTime)
+						fmt.Fprintf(cl.MetricsPipe, "recv;%d %s %s\n", recvTime, string(msg[:14]), string(msg[14:20]))
 					}
 
 					// When we hit the number of messages to
 					// receive that was specified, wait and exit.
 					if len(recvdMsgs) == cl.NumMsgToRecv {
 						fmt.Printf("Number of messages to receive reached, exiting.\n")
-						fmt.Fprint(cl.MetricsPipe, "done")
+						fmt.Fprint(cl.MetricsPipe, "done\n")
 						time.Sleep(2 * time.Second)
 						os.Exit(0)
 					}

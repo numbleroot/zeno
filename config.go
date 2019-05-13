@@ -26,9 +26,9 @@ const NumCascades = 1
 const LenCascade = 7
 
 // MsgLength defines the number of bytes
-// the conversation messages will have
-// in their original form.
-const MsgLength = 256
+// the content of each conversation message
+// will take up in space.
+const MsgLength = 224
 
 // MsgExitOverhead defines the number of
 // additional bytes for a conversation

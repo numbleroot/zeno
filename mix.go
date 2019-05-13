@@ -106,9 +106,6 @@ func (mix *Mix) ReconnectToSuccessor() error {
 // old messages.
 func (mix *Mix) AddCoverMsgsToPool(initFirst bool, numClients int, numSamples int) error {
 
-	// Number of mixes in own cascade until exit.
-	numMixesToEnd := len(mix.CurCascadesMatrix[mix.OwnChain]) - (mix.OwnIndex + 1)
-
 	// Randomly select k clients to generate
 	// cover messages to.
 	for i := 0; i < numSamples; i++ {
@@ -121,7 +118,7 @@ func (mix *Mix) AddCoverMsgsToPool(initFirst bool, numClients int, numSamples in
 		chosen := int(chosenBig.Int64())
 
 		// Pad recipient to fixed length.
-		recipientPadded := make([]byte, 21)
+		recipientPadded := make([]byte, 32)
 		_, err = io.ReadFull(rand.Reader, recipientPadded)
 		if err != nil {
 			return err
@@ -169,9 +166,11 @@ func (mix *Mix) AddCoverMsgsToPool(initFirst bool, numClients int, numSamples in
 
 		} else {
 
-			// This is not an exit mix, thus we
-			// want to onion-encrypt. Prepare key
-			// material.
+			// This is not an exit mix, thus we want
+			// to onion-encrypt. Prepare key material.
+
+			// Number of mixes in own cascade until exit.
+			numMixesToEnd := len(mix.CurCascadesMatrix[mix.OwnChain]) - (mix.OwnIndex + 1)
 
 			// Prepare key chain for this participant.
 			keys := make([]*OnionKeyState, numMixesToEnd)
@@ -410,6 +409,54 @@ func (mix *Mix) SendOutMsg(msgChan chan *rpc.ConvoMsg) {
 	}
 }
 
+// CreateEvalDoneBatch has the purpose of constructing
+// a Batch of size one with the single message telling
+// the succeeding mix to complete the evaluation.
+func (mix *Mix) CreateEvalDoneBatch() (*capnp.Message, error) {
+
+	// Create new empty Cap'n Proto message.
+	protoMsg, protoMsgSeg, err := capnp.NewMessage(capnp.SingleSegment(nil))
+	if err != nil {
+		return nil, err
+	}
+
+	// Create new empty batch message.
+	batch, err := rpc.NewRootBatch(protoMsgSeg)
+	if err != nil {
+		return nil, err
+	}
+
+	// Prepare empty recipient and stop message.
+	emptyRecipient := make([]byte, 32)
+	evalDoneMsg := make([]byte, MsgLength)
+	copy(evalDoneMsg[:], "EVAL DONE")
+
+	// Create empty Cap'n Proto messsage.
+	_, protoMsgSeg, err = capnp.NewMessage(capnp.SingleSegment(nil))
+	if err != nil {
+		return nil, err
+	}
+
+	// Fill stopper message.
+	evalDoneConvoMsg, err := rpc.NewRootConvoMsg(protoMsgSeg)
+	if err != nil {
+		return nil, err
+	}
+	evalDoneConvoMsg.SetPubKeyOrAddr(emptyRecipient)
+	evalDoneConvoMsg.SetContent(evalDoneMsg[:])
+
+	// Prepare a list of messages size one.
+	msgs, err := batch.NewMsgs(1)
+	if err != nil {
+		return nil, err
+	}
+
+	// Add as only message the stop message.
+	msgs.Set(0, evalDoneConvoMsg)
+
+	return protoMsg, nil
+}
+
 // RotateRoundState performs the necessary
 // operations to switch from one round to
 // the next. This involves appropriately
@@ -449,10 +496,26 @@ func (mix *Mix) RotateRoundState() {
 			// Acquire lock on first pool.
 			mix.muAddMsgs.Lock()
 
+			evalCompleted := false
 			if mix.IsEval {
+
 				// If we are conducting an evaluation,
 				// send pool sizes to collector sidecar.
-				fmt.Fprintf(mix.MetricsPipe, "1st:%d 2nd:%d 3rd:%d out:%d\n", len(mix.FirstPool), len(mix.SecPool), len(mix.ThirdPool), len(mix.OutPool))
+				fmt.Fprintf(mix.MetricsPipe, "%d 1st:%d 2nd:%d 3rd:%d out:%d\n", time.Now().UnixNano(),
+					len(mix.FirstPool), len(mix.SecPool), len(mix.ThirdPool), len(mix.OutPool))
+
+				fmt.Printf("len(mix.ClientsSeen) = %d\n", len(mix.ClientsSeen))
+
+				if mix.IsEntry && (len(mix.ClientsSeen) == 0) {
+
+					// In case the clients have ceased sending due
+					// having seen the amount of messages they were
+					// configured to await, signal collector sidecar
+					// that we are done sending metrics.
+					fmt.Printf("Entry mix detected no further client messages, completing metrics collection.\n")
+					fmt.Fprintf(mix.MetricsPipe, "done\n")
+					evalCompleted = true
+				}
 			}
 
 			// Reset participation tracking map.
@@ -577,29 +640,46 @@ func (mix *Mix) RotateRoundState() {
 
 			} else {
 
-				// Create new empty Cap'n Proto message.
-				protoMsg, protoMsgSeg, err := capnp.NewMessage(capnp.SingleSegment(nil))
-				if err != nil {
-					fmt.Printf("Rotating round state failed: %v\n", err)
-					os.Exit(1)
-				}
+				var protoMsg *capnp.Message
+				var protoMsgSeg *capnp.Segment
 
-				// Create new empty batch message.
-				batch, err := rpc.NewRootBatch(protoMsgSeg)
-				if err != nil {
-					fmt.Printf("Rotating round state failed: %v\n", err)
-					os.Exit(1)
-				}
+				if mix.IsEval && evalCompleted {
 
-				// Prepare a list of messages of fitting size.
-				msgs, err := batch.NewMsgs(int32(len(mix.OutPool)))
-				if err != nil {
-					fmt.Printf("Rotating round state failed: %v\n", err)
-					os.Exit(1)
-				}
+					// Prepare message batch of size one with the
+					// sole purpose of telling downstream mixes
+					// to complete their evaluation and exit.
+					protoMsg, err = mix.CreateEvalDoneBatch()
+					if err != nil {
+						fmt.Printf("Preparing evaluation done batch failed: %v\n", err)
+						os.Exit(1)
+					}
 
-				for i := range mix.OutPool {
-					msgs.Set(i, *mix.OutPool[i])
+				} else {
+
+					// Create new empty Cap'n Proto message.
+					protoMsg, protoMsgSeg, err = capnp.NewMessage(capnp.SingleSegment(nil))
+					if err != nil {
+						fmt.Printf("Rotating round state failed: %v\n", err)
+						os.Exit(1)
+					}
+
+					// Create new empty batch message.
+					batch, err := rpc.NewRootBatch(protoMsgSeg)
+					if err != nil {
+						fmt.Printf("Rotating round state failed: %v\n", err)
+						os.Exit(1)
+					}
+
+					// Prepare a list of messages of fitting size.
+					msgs, err := batch.NewMsgs(int32(len(mix.OutPool)))
+					if err != nil {
+						fmt.Printf("Rotating round state failed: %v\n", err)
+						os.Exit(1)
+					}
+
+					for i := range mix.OutPool {
+						msgs.Set(i, *mix.OutPool[i])
+					}
 				}
 
 				// Encode message and send it via stream.
@@ -618,6 +698,11 @@ func (mix *Mix) RotateRoundState() {
 			if err != nil {
 				fmt.Printf("Rotating round state failed: %v\n", err)
 				os.Exit(1)
+			}
+
+			if mix.IsEval && evalCompleted {
+				fmt.Printf("Entry mix has detected end of evaluation and sent all signals. Exiting.")
+				os.Exit(0)
 			}
 		}
 	}
@@ -748,10 +833,12 @@ func (mix *Mix) AddConvoMsg(connWrite quic.Stream, sender string) {
 // subsequent mix node.
 func (mix *Mix) HandleBatchMsgs(connWrite quic.Stream, sender string) error {
 
-	// Ensure only the predecessor mix is able to
-	// take up this mix node's compute ressources.
 	if sender != strings.Split(mix.CurCascadesMatrix[mix.OwnChain][(mix.OwnIndex-1)].Addr, ":")[0] {
-		return fmt.Errorf("node at %s tried to send a message batch but we expect predecessor %s", sender, mix.CurCascadesMatrix[mix.OwnChain][(mix.OwnIndex-1)].Addr)
+
+		// Ensure only the predecessor mix is able to
+		// take up this mix node's compute resources.
+		return fmt.Errorf("node at %s tried to send a message batch but we expect predecessor %s", sender,
+			mix.CurCascadesMatrix[mix.OwnChain][(mix.OwnIndex-1)].Addr)
 	}
 
 	for {
@@ -811,6 +898,35 @@ func (mix *Mix) HandleBatchMsgs(connWrite quic.Stream, sender string) error {
 				encConvoMsg, err := encConvoMsgRaw.Content()
 				if err != nil {
 					return err
+				}
+
+				if mix.IsEval && (numMsgs == 1) && bytes.HasPrefix(encConvoMsg, []byte("EVAL DONE")) {
+
+					// Special case: the preceding mix signaled
+					// that the evaluation has completed.
+
+					fmt.Printf("Non-entry mix received stop message, completing metrics collection.\n")
+					fmt.Fprintf(mix.MetricsPipe, "done\n")
+
+					// Prepare message batch of size one with the
+					// sole purpose of telling downstream mixes
+					// to complete their evaluation and exit.
+					protoMsg, err := mix.CreateEvalDoneBatch()
+					if err != nil {
+						return err
+					}
+
+					// Encode message and send it via stream.
+					err = capnp.NewEncoder(mix.Successor).Encode(protoMsg)
+					if err != nil {
+
+						if err.Error() != "NO_ERROR" {
+							return err
+						}
+					}
+
+					fmt.Printf("Non-entry mix has detected end of evaluation and sent all signals. Exiting.")
+					os.Exit(0)
 				}
 
 				// Calculate expected length of message.
