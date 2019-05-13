@@ -501,10 +501,8 @@ func (mix *Mix) RotateRoundState() {
 
 				// If we are conducting an evaluation,
 				// send pool sizes to collector sidecar.
-				fmt.Fprintf(mix.MetricsPipe, "%d 1st:%d 2nd:%d 3rd:%d out:%d\n", time.Now().UnixNano(),
+				fmt.Fprintf(mix.MetricsPipe, "%d 1st:%d 2nd:%d 3rd:%d out:%d\n", time.Now().Unix(),
 					len(mix.FirstPool), len(mix.SecPool), len(mix.ThirdPool), len(mix.OutPool))
-
-				fmt.Printf("len(mix.ClientsSeen) = %d\n", len(mix.ClientsSeen))
 
 				if mix.IsEntry && (len(mix.ClientsSeen) == 0) {
 
