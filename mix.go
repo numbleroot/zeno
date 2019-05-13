@@ -513,7 +513,7 @@ func (mix *Mix) RotateRoundState() {
 					// configured to await, signal collector sidecar
 					// that we are done sending metrics.
 					fmt.Printf("Entry mix detected no further client messages, completing metrics collection.\n")
-					fmt.Fprintf(mix.MetricsPipe, "done\n")
+					fmt.Fprint(mix.MetricsPipe, "done")
 					evalCompleted = true
 				}
 			}
@@ -701,7 +701,7 @@ func (mix *Mix) RotateRoundState() {
 			}
 
 			if mix.IsEval && evalCompleted {
-				fmt.Printf("Entry mix has detected end of evaluation and sent all signals. Exiting.")
+				fmt.Printf("Entry mix has detected end of evaluation and sent all signals. Exiting.\n")
 				os.Exit(0)
 			}
 		}
@@ -906,7 +906,7 @@ func (mix *Mix) HandleBatchMsgs(connWrite quic.Stream, sender string) error {
 					// that the evaluation has completed.
 
 					fmt.Printf("Non-entry mix received stop message, completing metrics collection.\n")
-					fmt.Fprintf(mix.MetricsPipe, "done\n")
+					fmt.Fprint(mix.MetricsPipe, "done")
 
 					// Prepare message batch of size one with the
 					// sole purpose of telling downstream mixes
@@ -925,7 +925,7 @@ func (mix *Mix) HandleBatchMsgs(connWrite quic.Stream, sender string) error {
 						}
 					}
 
-					fmt.Printf("Non-entry mix has detected end of evaluation and sent all signals. Exiting.")
+					fmt.Printf("Non-entry mix has detected end of evaluation and sent all signals. Exiting.\n")
 					os.Exit(0)
 				}
 

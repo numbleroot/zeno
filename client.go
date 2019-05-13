@@ -486,7 +486,7 @@ func (cl *Client) RunRounds() {
 					// receive that was specified, wait and exit.
 					if len(recvdMsgs) == cl.NumMsgToRecv {
 						fmt.Printf("Number of messages to receive reached, exiting.\n")
-						fmt.Fprint(cl.MetricsPipe, "done\n")
+						fmt.Fprint(cl.MetricsPipe, "done")
 						time.Sleep(2 * time.Second)
 						os.Exit(0)
 					}

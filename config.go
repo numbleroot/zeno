@@ -34,7 +34,7 @@ const MsgLength = 224
 // additional bytes for a conversation
 // message to be processed by the exit
 // mix and send to the final recipient.
-const MsgExitOverhead = 96
+const MsgExitOverhead = 104
 
 // MsgCascadeOverhead defines the number
 // of bytes of overhead each mix layer
