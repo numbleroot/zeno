@@ -254,7 +254,7 @@ func OnionEncryptAndSend(retChan chan *ClientSendResult, text []byte, recipient 
 // traffic is encrypted and sent in its place.
 func (cl *Client) SendMsg() {
 
-	msgID := 0
+	msgID := 1
 	isSecTransmission := false
 
 	for {
@@ -299,10 +299,10 @@ func (cl *Client) SendMsg() {
 				// is the preceding client.
 				if (i % 2) == 0 {
 					partner = cl.CurClients[(i + 1)].Addr
-					convoID = fmt.Sprintf("%06d=>%06d", i, (i + 1))
+					convoID = fmt.Sprintf("%05d=>%05d", (i + 1), (i + 2))
 				} else {
 					partner = cl.CurClients[(i - 1)].Addr
-					convoID = fmt.Sprintf("%06d=>%06d", i, (i - 1))
+					convoID = fmt.Sprintf("%05d=>%05d", (i + 1), i)
 				}
 			}
 		}
@@ -327,14 +327,14 @@ func (cl *Client) SendMsg() {
 			os.Exit(1)
 		}
 
-		// First 14 bytes will be conversation ID.
+		// First 12 bytes will be conversation ID.
 		copy(msg[:], convoID)
 
-		// Bytes 15 - 20 are the message sequence number.
-		copy(msg[14:], fmt.Sprintf("%06d", msgID))
+		// Bytes 13 - 17 are the message sequence number.
+		copy(msg[12:], fmt.Sprintf("%05d", msgID))
 
-		// Bytes 21 - MsgLength are the actual message.
-		copy(msg[20:], Msg)
+		// Bytes 18 - MsgLength are the actual message.
+		copy(msg[17:], Msg)
 
 		retChan := make(chan *ClientSendResult)
 
@@ -385,7 +385,7 @@ func (cl *Client) SendMsg() {
 				// In case we are evaluating this client, send
 				// the measurement line to collector sidecar.
 				if cl.IsEval {
-					fmt.Fprintf(cl.MetricsPipe, "send;%d %s %s\n", retState.Time, msg[:14], msg[14:20])
+					fmt.Fprintf(cl.MetricsPipe, "send;%d %s %s\n", retState.Time, msg[:12], msg[12:17])
 				}
 			}
 		}
@@ -467,19 +467,19 @@ func (cl *Client) RunRounds() {
 			if !bytes.Equal(msg[0:28], []byte("COVER MESSAGE PLEASE DISCARD")) {
 
 				// Check dedup map for previous encounter.
-				_, seenBefore := recvdMsgs[string(msg[:20])]
+				_, seenBefore := recvdMsgs[string(msg[:17])]
 				if !seenBefore {
 
 					// Update message tracker.
-					recvdMsgs[string(msg[:20])] = true
+					recvdMsgs[string(msg[:17])] = true
 
 					// Finally, print received message.
-					fmt.Printf("\n@%s> %s\n", msg[14:20], msg[20:])
+					fmt.Printf("\n@%s> %s\n", msg[12:17], msg[17:])
 
 					// Send prepared measurement log line to
 					// collector sidecar.
 					if cl.IsEval {
-						fmt.Fprintf(cl.MetricsPipe, "recv;%d %s %s\n", recvTime, string(msg[:14]), string(msg[14:20]))
+						fmt.Fprintf(cl.MetricsPipe, "recv;%d %s %s\n", recvTime, string(msg[:12]), string(msg[12:17]))
 					}
 
 					// When we hit the number of messages to
