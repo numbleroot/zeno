@@ -504,6 +504,8 @@ func (mix *Mix) RotateRoundState() {
 				fmt.Fprintf(mix.MetricsPipe, "%d 1st:%d 2nd:%d 3rd:%d out:%d\n", time.Now().Unix(),
 					len(mix.FirstPool), len(mix.SecPool), len(mix.ThirdPool), len(mix.OutPool))
 
+				fmt.Printf("len(mix.ClientsSeen)=%d\n", len(mix.ClientsSeen))
+
 				if mix.IsEntry && (len(mix.ClientsSeen) == 0) {
 
 					// In case the clients have ceased sending due
@@ -511,7 +513,7 @@ func (mix *Mix) RotateRoundState() {
 					// configured to await, signal collector sidecar
 					// that we are done sending metrics.
 					fmt.Printf("Entry mix detected no further client messages, completing metrics collection.\n")
-					fmt.Fprint(mix.MetricsPipe, "done")
+					fmt.Fprintf(mix.MetricsPipe, "done\n")
 					evalCompleted = true
 				}
 			}
@@ -624,8 +626,8 @@ func (mix *Mix) RotateRoundState() {
 
 				// Prepare parallel sending of outgoing
 				// messages to clients.
-				msgChan := make(chan *rpc.ConvoMsg, 500)
-				for i := 0; i < 500; i++ {
+				msgChan := make(chan *rpc.ConvoMsg, 1000)
+				for i := 0; i < 1000; i++ {
 					go mix.SendOutMsg(msgChan)
 				}
 
@@ -904,7 +906,7 @@ func (mix *Mix) HandleBatchMsgs(connWrite quic.Stream, sender string) error {
 					// that the evaluation has completed.
 
 					fmt.Printf("Non-entry mix received stop message, completing metrics collection.\n")
-					fmt.Fprint(mix.MetricsPipe, "done")
+					fmt.Fprintf(mix.MetricsPipe, "done\n")
 
 					// Prepare message batch of size one with the
 					// sole purpose of telling downstream mixes

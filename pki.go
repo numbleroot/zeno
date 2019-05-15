@@ -222,7 +222,7 @@ func (node *Node) ElectMixes(data []string) error {
 	fmt.Printf("Upcoming cascades matrix:\n")
 	for i := range node.NextCascadesMatrix {
 
-		fmt.Printf("\tCASC %d: ", i)
+		fmt.Printf("\tCASCADE %d: ", i)
 		for j := range node.NextCascadesMatrix[i] {
 
 			if j == (len(node.NextCascadesMatrix[i]) - 1) {

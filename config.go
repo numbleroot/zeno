@@ -14,7 +14,7 @@ const RoundTime = 2 * time.Second
 // amount of messages added additionally
 // to half of the number of messages in
 // a pool to append to the outgoing pool.
-const BatchSizeVariance = 5
+const BatchSizeVariance = 100
 
 // NumCascades defines the number of
 // distinct cascades that make up the
@@ -41,6 +41,20 @@ const MsgExitOverhead = 104
 // adds to the original message for
 // proper processing.
 const MsgCascadeOverhead = 104
+
+// ClientsWaitBetweenMsgsSuccess defines
+// the amount of time clients will sleep
+// before attempting to send a subsequent
+// message to the entry mix after the
+// current attempt was successful.
+const ClientsWaitBetweenMsgsSuccess = 3 * (RoundTime / 4)
+
+// ClientsWaitBetweenMsgsRetry defines
+// the amount of time clients will sleep
+// before attempting to send a subsequent
+// message to the entry mix after the
+// current attempt was unsuccessful.
+const ClientsWaitBetweenMsgsRetry = RoundTime / 8
 
 // Msg is the conversation message that
 // is sent between participants of the

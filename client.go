@@ -358,6 +358,8 @@ func (cl *Client) SendMsg() {
 			}
 		}
 
+		fmt.Printf("Msg: '%s' (secondTransmission: %v), response: '%d' (succeeded: %v)\n", msg[:17], isSecTransmission, retState.Status, succeeded)
+
 		go func(retChan chan *ClientSendResult) {
 
 			// Drain result state channel, such that
@@ -390,10 +392,10 @@ func (cl *Client) SendMsg() {
 			}
 		}
 
-		if retState.Status == 0 || retState.Status == 2 {
-			time.Sleep(((RoundTime) / 5))
+		if retState.Status == 0 {
+			time.Sleep(ClientsWaitBetweenMsgsSuccess)
 		} else {
-			time.Sleep(((RoundTime) / 15))
+			time.Sleep(ClientsWaitBetweenMsgsRetry)
 		}
 	}
 }
@@ -473,7 +475,7 @@ func (cl *Client) RunRounds() {
 					// Update message tracker.
 					recvdMsgs[string(msg[:17])] = true
 
-					// Finally, print received message.
+					// Print received message.
 					fmt.Printf("\n@%s> %s\n", msg[12:17], msg[17:])
 
 					// Send prepared measurement log line to
@@ -485,8 +487,12 @@ func (cl *Client) RunRounds() {
 					// When we hit the number of messages to
 					// receive that was specified, wait and exit.
 					if len(recvdMsgs) == cl.NumMsgToRecv {
-						fmt.Printf("Number of messages to receive reached, exiting.\n")
-						fmt.Fprint(cl.MetricsPipe, "done")
+
+						if cl.IsEval {
+							fmt.Fprintf(cl.MetricsPipe, "done\n")
+						}
+
+						fmt.Printf("Number of messages to receive reached (want: %d, saw: %d), exiting.\n", cl.NumMsgToRecv, len(recvdMsgs))
 						time.Sleep(2 * time.Second)
 						os.Exit(0)
 					}
