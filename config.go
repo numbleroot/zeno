@@ -14,7 +14,7 @@ const RoundTime = 2 * time.Second
 // amount of messages added additionally
 // to half of the number of messages in
 // a pool to append to the outgoing pool.
-const BatchSizeVariance = 100
+const BatchSizeVariance = 10
 
 // NumCascades defines the number of
 // distinct cascades that make up the

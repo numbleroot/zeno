@@ -4,17 +4,18 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/binary"
 	"encoding/gob"
 	"encoding/hex"
 	"fmt"
 	mathrand "math/rand"
+	"net"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/lucas-clemente/quic-go"
 	"golang.org/x/crypto/nacl/box"
 	"golang.org/x/crypto/scrypt"
 	"golang.org/x/crypto/sha3"
@@ -24,7 +25,7 @@ import (
 // node of this system under at the PKI, 0 signals
 // 'node wants to be a mix', 1 signals 'node is a
 // client'. It transmit relevant node and connection
-// information via TLS-over-QUIC to the PKI server.
+// information via TLS to the PKI server.
 func (node *Node) RegisterAtPKI(category uint8) error {
 
 	var resp string
@@ -32,19 +33,13 @@ func (node *Node) RegisterAtPKI(category uint8) error {
 	for resp != "0" {
 
 		// Connect to PKI TLS endpoint.
-		session, err := quic.DialAddr(node.PKIAddr, node.PKITLSConfAsClient, nil)
-		if err != nil {
-			return err
-		}
-
-		fmt.Printf("\nConnected to PKI at %s.\n", node.PKIAddr)
-
-		// Upgrade session to blocking stream.
-		connWrite, err := session.OpenStreamSync()
+		connWrite, err := tls.Dial("tcp", node.PKIAddr, node.PKITLSConfAsClient)
 		if err != nil {
 			return err
 		}
 		encoder := gob.NewEncoder(connWrite)
+
+		fmt.Printf("\nConnected to PKI at %s.\n", node.PKIAddr)
 
 		// Create buffered I/O reader from connection.
 		connRead := bufio.NewReader(connWrite)
@@ -307,7 +302,7 @@ func (node *Node) ParseClients(data []string) error {
 // HandleMsgFromPKI parses the received message
 // from the PKI and takes appropriate steps
 // after having parsed it.
-func (node *Node) HandleMsgFromPKI(connRead *bufio.Reader, connWrite quic.Stream) {
+func (node *Node) HandleMsgFromPKI(connRead *bufio.Reader, connWrite net.Conn) {
 
 	// Receive data as string from PKI.
 	dataRaw, err := connRead.ReadString('\n')
@@ -368,20 +363,11 @@ func (node *Node) AcceptMsgsFromPKI() {
 	for {
 
 		// Wait for incoming connections from PKI.
-		session, err := node.PKIListener.Accept()
+		connWrite, err := node.PKIListener.Accept()
 		if err != nil {
 			fmt.Printf("Error accepting connection from PKI: %v\n", err)
 			continue
 		}
-
-		// Upgrade session to synchronous stream.
-		connWrite, err := session.AcceptStream()
-		if err != nil {
-			fmt.Printf("Failed accepting incoming stream from PKI: %v\n", err)
-			continue
-		}
-
-		// Create buffered I/O reader from connection.
 		connRead := bufio.NewReader(connWrite)
 
 		go node.HandleMsgFromPKI(connRead, connWrite)

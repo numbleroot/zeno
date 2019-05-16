@@ -3,11 +3,11 @@ package main
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"net"
 	"os"
 	"sync"
 	"time"
 
-	"github.com/lucas-clemente/quic-go"
 	"github.com/numbleroot/zeno/rpc"
 )
 
@@ -65,7 +65,7 @@ type ConvoMsg struct {
 // any node in our system works with.
 type Node struct {
 	PubLisAddr             string
-	PubListener            quic.Listener
+	PubListener            net.Listener
 	CurRecvPubKey          *[32]byte
 	CurRecvSecKey          *[32]byte
 	CurPubTLSConfAsServer  *tls.Config
@@ -79,7 +79,7 @@ type Node struct {
 	PKITLSConfAsClient     *tls.Config
 	PKITLSConfAsServer     *tls.Config
 	PKICertPEM             []byte
-	PKIListener            quic.Listener
+	PKIListener            net.Listener
 	SigRotateEpoch         chan struct{}
 	SigCloseEpoch          chan struct{}
 	SigMixesElected        chan struct{}
@@ -111,7 +111,7 @@ type Mix struct {
 	OwnIndex    int
 	IsEntry     bool
 	IsExit      bool
-	Successor   quic.Stream
+	Successor   *tls.Conn
 	RoundTicker *time.Ticker
 	muAddMsgs   *sync.Mutex
 	ClientsSeen map[string]bool

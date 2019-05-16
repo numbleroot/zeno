@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lucas-clemente/quic-go"
 	"github.com/numbleroot/zeno/rpc"
 	"golang.org/x/crypto/nacl/box"
 	capnp "zombiezen.com/go/capnproto2"
@@ -175,47 +174,24 @@ func OnionEncryptAndSend(retChan chan *ClientSendResult, text []byte, recipient 
 	onionMsg.SetPubKeyOrAddr(keyState[0].PubKey[:])
 	onionMsg.SetContent(encMsg)
 
-	// Connect to this cascade's entry mix
-	// via TLS-over-QUIC.
-	session, err := quic.DialAddr(chain[0].Addr, &tls.Config{
+	// Connect to this cascade's entry mix.
+	connWrite, err := tls.Dial("tcp", chain[0].Addr, &tls.Config{
 		RootCAs:            &chain[0].PubCertPool,
 		InsecureSkipVerify: false,
 		MinVersion:         tls.VersionTLS13,
 		CurvePreferences:   []tls.CurveID{tls.X25519},
-	}, nil)
+	})
 	if err != nil {
-
-		if err.Error() != "NO_ERROR" {
-			fmt.Printf("Failed connecting to entry mix %s via QUIC: %v\n", chain[0].Addr, err)
-		}
-
+		fmt.Printf("Failed connecting to entry mix %s via TLS: %v\n", chain[0].Addr, err)
 		retChan <- &ClientSendResult{Status: 1, Time: -1}
 		return
 	}
-
-	// Upgrade session to blocking stream.
-	stream, err := session.OpenStreamSync()
-	if err != nil {
-
-		if err.Error() != "NO_ERROR" {
-			fmt.Printf("Failed to upgrade QUIC session to stream: %v\n", err)
-		}
-
-		retChan <- &ClientSendResult{Status: 1, Time: -1}
-		return
-	}
-
-	// Create buffered I/O reader from connection.
-	connRead := bufio.NewReader(stream)
+	connRead := bufio.NewReader(connWrite)
 
 	// Encode message and send it via stream.
-	err = capnp.NewEncoder(stream).Encode(protoMsg)
+	err = capnp.NewEncoder(connWrite).Encode(protoMsg)
 	if err != nil {
-
-		if err.Error() != "NO_ERROR" {
-			fmt.Printf("Failed to encode and send onion-encrypted message to entry mix %s: %v\n", chain[0].Addr, err)
-		}
-
+		fmt.Printf("Failed to encode and send onion-encrypted message to entry mix %s: %v\n", chain[0].Addr, err)
 		retChan <- &ClientSendResult{Status: 1, Time: -1}
 		return
 	}
@@ -226,11 +202,7 @@ func OnionEncryptAndSend(retChan chan *ClientSendResult, text []byte, recipient 
 	// Wait for acknowledgement.
 	statusRaw, err := connRead.ReadString('\n')
 	if err != nil {
-
-		if err.Error() != "NO_ERROR" {
-			fmt.Printf("Failed to receive response to delivery of conversation message: %v\n", err)
-		}
-
+		fmt.Printf("Failed to receive response to delivery of conversation message: %v\n", err)
 		retChan <- &ClientSendResult{Status: 1, Time: -1}
 		return
 	}
@@ -358,8 +330,6 @@ func (cl *Client) SendMsg() {
 			}
 		}
 
-		fmt.Printf("Msg: '%s' (secondTransmission: %v), response: '%d' (succeeded: %v)\n", msg[:17], isSecTransmission, retState.Status, succeeded)
-
 		go func(retChan chan *ClientSendResult) {
 
 			// Drain result state channel, such that
@@ -410,6 +380,8 @@ func (cl *Client) RunRounds() {
 	// that we have not already passed on before.
 	recvdMsgs := make(map[string]bool)
 
+	clientDoneCounter := 250
+
 	// Handle messaging loop.
 	go cl.SendMsg()
 
@@ -428,24 +400,9 @@ func (cl *Client) RunRounds() {
 		default:
 
 			// Wait for incoming connections on public socket.
-			session, err := cl.PubListener.Accept()
+			connWrite, err := cl.PubListener.Accept()
 			if err != nil {
-
-				if err.Error() != "NO_ERROR" {
-					fmt.Printf("Public connection error: %v\n", err)
-				}
-
-				continue
-			}
-
-			// Upgrade session to stream.
-			connWrite, err := session.AcceptStream()
-			if err != nil {
-
-				if err.Error() != "NO_ERROR" {
-					fmt.Printf("Failed accepting incoming stream: %v\n", err)
-				}
-
+				fmt.Printf("Public connection error: %v\n", err)
 				continue
 			}
 			decoder := gob.NewDecoder(connWrite)
@@ -454,11 +411,7 @@ func (cl *Client) RunRounds() {
 			var msg []byte
 			err = decoder.Decode(&msg)
 			if err != nil {
-
-				if err.Error() != "NO_ERROR" {
-					fmt.Printf("Failed decoding incoming message as slice of bytes: %v\n", err)
-				}
-
+				fmt.Printf("Failed decoding incoming message as slice of bytes: %v\n", err)
 				continue
 			}
 
@@ -476,27 +429,33 @@ func (cl *Client) RunRounds() {
 					recvdMsgs[string(msg[:17])] = true
 
 					// Print received message.
-					fmt.Printf("\n@%s> %s\n", msg[12:17], msg[17:])
+					fmt.Printf("\n@%s> %s\n\n", msg[12:17], msg[17:])
 
 					// Send prepared measurement log line to
 					// collector sidecar.
 					if cl.IsEval {
 						fmt.Fprintf(cl.MetricsPipe, "recv;%d %s %s\n", recvTime, string(msg[:12]), string(msg[12:17]))
 					}
-
-					// When we hit the number of messages to
-					// receive that was specified, wait and exit.
-					if len(recvdMsgs) == cl.NumMsgToRecv {
-
-						if cl.IsEval {
-							fmt.Fprintf(cl.MetricsPipe, "done\n")
-						}
-
-						fmt.Printf("Number of messages to receive reached (want: %d, saw: %d), exiting.\n", cl.NumMsgToRecv, len(recvdMsgs))
-						time.Sleep(2 * time.Second)
-						os.Exit(0)
-					}
 				}
+			}
+
+			// When we hit the number of messages set to
+			// receive, decrease shutdown grace period counter.
+			if len(recvdMsgs) >= cl.NumMsgToRecv {
+				clientDoneCounter--
+			}
+
+			// As soon as the grace period counter has reached
+			// zero, send out metrics stop signal and exit.
+			if clientDoneCounter == 0 {
+
+				if cl.IsEval {
+					fmt.Fprintf(cl.MetricsPipe, "done\n")
+				}
+
+				fmt.Printf("Number of messages to receive reached (want: %d, saw: %d), exiting.\n", cl.NumMsgToRecv, len(recvdMsgs))
+				time.Sleep(2 * time.Second)
+				os.Exit(0)
 			}
 		}
 	}

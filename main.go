@@ -1,14 +1,13 @@
 package main
 
 import (
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
-
-	"github.com/lucas-clemente/quic-go"
 )
 
 // Enable TLS 1.3.
@@ -95,7 +94,7 @@ func main() {
 
 	// Open up socket for eventual cascades matrix
 	// election data from PKI.
-	node.PKIListener, err = quic.ListenAddr(node.PKILisAddr, node.PKITLSConfAsServer, nil)
+	node.PKIListener, err = tls.Listen("tcp", node.PKILisAddr, node.PKITLSConfAsServer)
 	if err != nil {
 		fmt.Printf("Failed to listen for PKI information on socket %s: %v\n", node.PKILisAddr, err)
 		os.Exit(1)
@@ -150,7 +149,7 @@ func main() {
 			mix.Successor = nil
 
 			// Open socket for incoming mix-net messages.
-			mix.PubListener, err = quic.ListenAddr(mix.PubLisAddr, mix.CurPubTLSConfAsServer, nil)
+			mix.PubListener, err = tls.Listen("tcp", mix.PubLisAddr, mix.CurPubTLSConfAsServer)
 			if err != nil {
 				fmt.Printf("Failed to listen for mix-net messages on socket %s: %v\n", mix.PubLisAddr, err)
 				os.Exit(1)
@@ -195,7 +194,7 @@ func main() {
 			client.CurClientsByAddress = client.NextClientsByAddress
 
 			// Open socket for incoming mix-net messages.
-			client.PubListener, err = quic.ListenAddr(client.PubLisAddr, client.CurPubTLSConfAsServer, nil)
+			client.PubListener, err = tls.Listen("tcp", client.PubLisAddr, client.CurPubTLSConfAsServer)
 			if err != nil {
 				fmt.Printf("Failed to listen for mix-net messages on socket %s: %v\n", client.PubLisAddr, err)
 				client.muUpdState.Unlock()

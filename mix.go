@@ -8,12 +8,12 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"net"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/lucas-clemente/quic-go"
 	"github.com/numbleroot/zeno/rpc"
 	"golang.org/x/crypto/nacl/box"
 	capnp "zombiezen.com/go/capnproto2"
@@ -65,7 +65,7 @@ func (mix *Mix) ReconnectToSuccessor() error {
 		// Extract next-in-cascade mix.
 		successor := mix.CurCascadesMatrix[mix.OwnChain][(mix.OwnIndex + 1)]
 
-		// Prepare TLS config to use for QUIC.
+		// Prepare TLS config.
 		tlsConf := &tls.Config{
 			RootCAs:            successor.PubCertPool,
 			InsecureSkipVerify: false,
@@ -73,25 +73,19 @@ func (mix *Mix) ReconnectToSuccessor() error {
 			CurvePreferences:   []tls.CurveID{tls.X25519},
 		}
 
-		// Dial successor mix via TLS-over-QUIC.
-		session, err := quic.DialAddr(successor.Addr, tlsConf, nil)
+		// Dial successor mix.
+		conn, err := tls.Dial("tcp", successor.Addr, tlsConf)
 		for err != nil {
 
 			fmt.Printf("Reconnecting to successor failed with: %v\n", err)
 			fmt.Printf("Trying again...\n")
 
-			session, err = quic.DialAddr(successor.Addr, tlsConf, nil)
+			conn, err = tls.Dial("tcp", successor.Addr, tlsConf)
 		}
 
 		fmt.Printf("Success! Reconnected to %s!\n", successor.Addr)
 
-		// Upgrade session to blocking stream.
-		stream, err := session.OpenStreamSync()
-		if err != nil {
-			return err
-		}
-
-		mix.Successor = stream
+		mix.Successor = conn
 	}
 
 	return nil
@@ -359,52 +353,24 @@ func (mix *Mix) SendOutMsg(msgChan chan *rpc.ConvoMsg) {
 		}
 
 		// Connect to client node.
-		session, err := quic.DialAddr(addrParts[0], &tls.Config{
+		connWrite, err := tls.Dial("tcp", addrParts[0], &tls.Config{
 			RootCAs:            client.PubCertPool,
 			InsecureSkipVerify: false,
 			MinVersion:         tls.VersionTLS13,
 			CurvePreferences:   []tls.CurveID{tls.X25519},
-		}, nil)
+		})
 		if err != nil {
-
-			if err.Error() != "NO_ERROR" {
-				fmt.Printf("Could not connect to client %s via QUIC: %v\n", addrParts[0], err)
-			}
-
+			fmt.Printf("Could not connect to client %s via TLS: %v\n", addrParts[0], err)
 			continue
 		}
-
-		// Upgrade session to blocking stream.
-		stream, err := session.OpenStreamSync()
-		if err != nil {
-
-			if err.Error() != "NO_ERROR" {
-				fmt.Printf("Failed to upgrade QUIC session to stream: %v\n", err)
-			}
-
-			continue
-		}
-
-		encoder := gob.NewEncoder(stream)
+		defer connWrite.Close()
+		encoder := gob.NewEncoder(connWrite)
 
 		// Send message content.
 		err = encoder.Encode(msg)
 		if err != nil {
-
-			if err.Error() != "NO_ERROR" {
-				fmt.Printf("Failed sending message to client %s: %v\n", addrParts[0], err)
-			}
-
+			fmt.Printf("Failed sending message to client %s: %v\n", addrParts[0], err)
 			continue
-		}
-
-		// Close connection to client.
-		err = stream.Close()
-		if err != nil {
-
-			if err.Error() != "NO_ERROR" {
-				fmt.Printf("Error while closing stream to %s: %v\n", addrParts[0], err)
-			}
 		}
 	}
 }
@@ -503,8 +469,6 @@ func (mix *Mix) RotateRoundState() {
 				// send pool sizes to collector sidecar.
 				fmt.Fprintf(mix.MetricsPipe, "%d 1st:%d 2nd:%d 3rd:%d out:%d\n", time.Now().Unix(),
 					len(mix.FirstPool), len(mix.SecPool), len(mix.ThirdPool), len(mix.OutPool))
-
-				fmt.Printf("len(mix.ClientsSeen)=%d\n", len(mix.ClientsSeen))
 
 				if mix.IsEntry && (len(mix.ClientsSeen) == 0) {
 
@@ -626,8 +590,8 @@ func (mix *Mix) RotateRoundState() {
 
 				// Prepare parallel sending of outgoing
 				// messages to clients.
-				msgChan := make(chan *rpc.ConvoMsg, 1000)
-				for i := 0; i < 1000; i++ {
+				msgChan := make(chan *rpc.ConvoMsg, len(mix.OutPool))
+				for i := 0; i < len(mix.OutPool); i++ {
 					go mix.SendOutMsg(msgChan)
 				}
 
@@ -685,11 +649,8 @@ func (mix *Mix) RotateRoundState() {
 				// Encode message and send it via stream.
 				err = capnp.NewEncoder(mix.Successor).Encode(protoMsg)
 				if err != nil {
-
-					if err.Error() != "NO_ERROR" {
-						fmt.Printf("Rotating round state failed: %v\n", err)
-						os.Exit(1)
-					}
+					fmt.Printf("Rotating round state failed: %v\n", err)
+					os.Exit(1)
 				}
 			}
 
@@ -710,27 +671,21 @@ func (mix *Mix) RotateRoundState() {
 
 // AddConvoMsg enables a client to deliver
 // a conversation message to an entry mix.
-func (mix *Mix) AddConvoMsg(connWrite quic.Stream, sender string) {
+func (mix *Mix) AddConvoMsg(connWrite net.Conn, sender string) {
 
 	// Decode message from stream.
 	encConvoMsgWire, err := capnp.NewDecoder(connWrite).Decode()
 	if err != nil {
-
-		if err.Error() != "NO_ERROR" {
-			fmt.Printf("Error decoding message from client: %v\n", err)
-			fmt.Fprintf(connWrite, "1\n")
-		}
-
+		fmt.Printf("Error decoding message from client: %v\n", err)
+		fmt.Fprintf(connWrite, "1\n")
 		return
 	}
 
 	// Extract contained encrypted conversation message.
 	encConvoMsgRaw, err := rpc.ReadRootConvoMsg(encConvoMsgWire)
 	if err != nil {
-
 		fmt.Printf("Failed reading root conversation message from client message: %v\n", err)
 		fmt.Fprintf(connWrite, "1\n")
-
 		return
 	}
 
@@ -739,10 +694,8 @@ func (mix *Mix) AddConvoMsg(connWrite quic.Stream, sender string) {
 	pubKey := new([32]byte)
 	pubKeyRaw, err := encConvoMsgRaw.PubKeyOrAddr()
 	if err != nil {
-
 		fmt.Printf("Failed to extract public key from conversation message: %v\n", err)
 		fmt.Fprintf(connWrite, "1\n")
-
 		return
 	}
 	copy(pubKey[:], pubKeyRaw)
@@ -751,22 +704,16 @@ func (mix *Mix) AddConvoMsg(connWrite quic.Stream, sender string) {
 	// received convo message.
 	encConvoMsg, err := encConvoMsgRaw.Content()
 	if err != nil {
-
 		fmt.Printf("Failed to extract content from conversation message: %v\n", err)
 		fmt.Fprintf(connWrite, "1\n")
-
 		return
 	}
 
-	// Calculate expected length of message.
-	expLen := MsgLength + ((LenCascade - 1) * MsgCascadeOverhead) + MsgExitOverhead
-
 	// Enforce message to be of correct length.
+	expLen := MsgLength + ((LenCascade - 1) * MsgCascadeOverhead) + MsgExitOverhead
 	if len(encConvoMsg) != expLen {
-
 		fmt.Printf("Message received from %s was of unexpected size %d bytes (expected %d), discarding.\n", sender, len(encConvoMsg), expLen)
 		fmt.Fprintf(connWrite, "1\n")
-
 		return
 	}
 
@@ -778,10 +725,8 @@ func (mix *Mix) AddConvoMsg(connWrite quic.Stream, sender string) {
 	// Decrypt message content.
 	convoMsgRaw, ok := box.Open(nil, encConvoMsg[24:], nonce, pubKey, mix.CurRecvSecKey)
 	if !ok {
-
 		fmt.Printf("Failed to decrypt received conversation message by client %s\n", sender)
 		fmt.Fprintf(connWrite, "1\n")
-
 		return
 	}
 
@@ -789,10 +734,8 @@ func (mix *Mix) AddConvoMsg(connWrite quic.Stream, sender string) {
 	// slice to Cap'n Proto message.
 	convoMsgProto, err := capnp.Unmarshal(convoMsgRaw)
 	if err != nil {
-
 		fmt.Printf("Error unmarshaling received contained message by client %s: %v\n", sender, err)
 		fmt.Fprintf(connWrite, "1\n")
-
 		return
 	}
 
@@ -800,10 +743,8 @@ func (mix *Mix) AddConvoMsg(connWrite quic.Stream, sender string) {
 	// conversation message we defined.
 	convoMsg, err := rpc.ReadRootConvoMsg(convoMsgProto)
 	if err != nil {
-
 		fmt.Printf("Error reading conversation message from contained message by client %s: %v\n", sender, err)
 		fmt.Fprintf(connWrite, "1\n")
-
 		return
 	}
 
@@ -831,7 +772,7 @@ func (mix *Mix) AddConvoMsg(connWrite quic.Stream, sender string) {
 // HandleBatchMsgs performs the necessary steps of
 // a mix node forwarding a batch of messages to a
 // subsequent mix node.
-func (mix *Mix) HandleBatchMsgs(connWrite quic.Stream, sender string) error {
+func (mix *Mix) HandleBatchMsgs(connWrite net.Conn, sender string) error {
 
 	if sender != strings.Split(mix.CurCascadesMatrix[mix.OwnChain][(mix.OwnIndex-1)].Addr, ":")[0] {
 
@@ -858,11 +799,6 @@ func (mix *Mix) HandleBatchMsgs(connWrite quic.Stream, sender string) error {
 			// Decode message batch from stream.
 			batchProto, err := capnp.NewDecoder(connWrite).Decode()
 			if err != nil {
-
-				if err.Error() == "NO_ERROR" {
-					return nil
-				}
-
 				return err
 			}
 
@@ -919,20 +855,15 @@ func (mix *Mix) HandleBatchMsgs(connWrite quic.Stream, sender string) error {
 					// Encode message and send it via stream.
 					err = capnp.NewEncoder(mix.Successor).Encode(protoMsg)
 					if err != nil {
-
-						if err.Error() != "NO_ERROR" {
-							return err
-						}
+						return err
 					}
 
 					fmt.Printf("Non-entry mix has detected end of evaluation and sent all signals. Exiting.\n")
 					os.Exit(0)
 				}
 
-				// Calculate expected length of message.
-				expLen := MsgLength + ((LenCascade - mix.OwnIndex - 1) * MsgCascadeOverhead) + MsgExitOverhead
-
 				// Enforce message to be of correct length.
+				expLen := MsgLength + ((LenCascade - mix.OwnIndex - 1) * MsgCascadeOverhead) + MsgExitOverhead
 				if len(encConvoMsg) != expLen {
 					return fmt.Errorf("message received from %s was of unexpected size %d bytes (expected %d), discarding", sender, len(encConvoMsg), expLen)
 				}
@@ -1015,20 +946,13 @@ func (mix *Mix) RunRounds() {
 			default:
 
 				// Wait for incoming connections on public socket.
-				session, err := mix.PubListener.Accept()
+				connWrite, err := mix.PubListener.Accept()
 				if err != nil {
 					fmt.Printf("Public connection error: %v\n", err)
 					continue
 				}
 
-				// Upgrade session to stream.
-				connWrite, err := session.AcceptStream()
-				if err != nil {
-					fmt.Printf("Failed accepting incoming stream: %v\n", err)
-					continue
-				}
-
-				sender := strings.Split(session.RemoteAddr().String(), ":")[0]
+				sender := strings.Split(connWrite.RemoteAddr().String(), ":")[0]
 
 				// At entry mixes we only receive single
 				// conversation messages from clients.
@@ -1039,20 +963,13 @@ func (mix *Mix) RunRounds() {
 	} else {
 
 		// Wait for incoming connections on public socket.
-		session, err := mix.PubListener.Accept()
+		connWrite, err := mix.PubListener.Accept()
 		if err != nil {
 			fmt.Printf("Public connection error: %v\n", err)
 			os.Exit(1)
 		}
 
-		// Upgrade session to stream.
-		connWrite, err := session.AcceptStream()
-		if err != nil {
-			fmt.Printf("Failed accepting incoming stream: %v\n", err)
-			os.Exit(1)
-		}
-
-		sender := strings.Split(session.RemoteAddr().String(), ":")[0]
+		sender := strings.Split(connWrite.RemoteAddr().String(), ":")[0]
 
 		// At non-entry mixes we only expect to receive
 		// Cap'n Proto batch messages.
