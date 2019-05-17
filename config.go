@@ -8,18 +8,18 @@ const EpochBrick = 5 * time.Second
 
 // RoundTime specifies the per-mix
 // duration of accepting messages.
-const RoundTime = 2 * time.Second
+const RoundTime = 10 * time.Second
 
 // BatchSizeVariance defines the maximum
 // amount of messages added additionally
 // to half of the number of messages in
 // a pool to append to the outgoing pool.
-const BatchSizeVariance = 10
+const BatchSizeVariance = 20
 
 // NumCascades defines the number of
 // distinct cascades that make up the
 // cascades matrix.
-const NumCascades = 1
+const NumCascades = 3
 
 // LenCascade defines the number of mixes
 // required to form one mix cascade.

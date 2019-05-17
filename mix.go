@@ -353,7 +353,9 @@ func (mix *Mix) SendOutMsg(msgChan chan *rpc.ConvoMsg) {
 		}
 
 		// Connect to client node.
-		connWrite, err := tls.Dial("tcp", addrParts[0], &tls.Config{
+		connWrite, err := tls.DialWithDialer(&net.Dialer{
+			Deadline: time.Now().Add(RoundTime),
+		}, "tcp", addrParts[0], &tls.Config{
 			RootCAs:            client.PubCertPool,
 			InsecureSkipVerify: false,
 			MinVersion:         tls.VersionTLS13,

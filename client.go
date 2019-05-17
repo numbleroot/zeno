@@ -8,6 +8,7 @@ import (
 	"encoding/gob"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -175,7 +176,9 @@ func OnionEncryptAndSend(retChan chan *ClientSendResult, text []byte, recipient 
 	onionMsg.SetContent(encMsg)
 
 	// Connect to this cascade's entry mix.
-	connWrite, err := tls.Dial("tcp", chain[0].Addr, &tls.Config{
+	connWrite, err := tls.DialWithDialer(&net.Dialer{
+		Deadline: time.Now().Add(RoundTime),
+	}, "tcp", chain[0].Addr, &tls.Config{
 		RootCAs:            &chain[0].PubCertPool,
 		InsecureSkipVerify: false,
 		MinVersion:         tls.VersionTLS13,
@@ -186,6 +189,7 @@ func OnionEncryptAndSend(retChan chan *ClientSendResult, text []byte, recipient 
 		retChan <- &ClientSendResult{Status: 1, Time: -1}
 		return
 	}
+	defer connWrite.Close()
 	connRead := bufio.NewReader(connWrite)
 
 	// Encode message and send it via stream.
@@ -411,12 +415,17 @@ func (cl *Client) RunRounds() {
 			var msg []byte
 			err = decoder.Decode(&msg)
 			if err != nil {
+				connWrite.Close()
 				fmt.Printf("Failed decoding incoming message as slice of bytes: %v\n", err)
 				continue
 			}
 
 			// Save receive time.
 			recvTime := time.Now().UnixNano()
+
+			// Close connection once the incoming
+			// message has been read.
+			connWrite.Close()
 
 			// Do not consider cover traffic messages.
 			if !bytes.Equal(msg[0:28], []byte("COVER MESSAGE PLEASE DISCARD")) {
@@ -429,7 +438,7 @@ func (cl *Client) RunRounds() {
 					recvdMsgs[string(msg[:17])] = true
 
 					// Print received message.
-					fmt.Printf("\n@%s> %s\n\n", msg[12:17], msg[17:])
+					fmt.Printf("@%s> %s\n", msg[12:17], msg[17:])
 
 					// Send prepared measurement log line to
 					// collector sidecar.
