@@ -8,7 +8,7 @@ const EpochBrick = 5 * time.Second
 
 // RoundTime specifies the per-mix
 // duration of accepting messages.
-const RoundTime = 10 * time.Second
+const RoundTime = 15 * time.Second
 
 // BatchSizeVariance defines the maximum
 // amount of messages added additionally

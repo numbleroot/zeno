@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Enable TLS 1.3.
@@ -94,11 +95,27 @@ func main() {
 
 	// Open up socket for eventual cascades matrix
 	// election data from PKI.
+	tried := 0
 	node.PKIListener, err = tls.Listen("tcp", node.PKILisAddr, node.PKITLSConfAsServer)
 	if err != nil {
-		fmt.Printf("Failed to listen for PKI information on socket %s: %v\n", node.PKILisAddr, err)
+		fmt.Printf("Failed to listen on PKI socket %s (will try again): %v\n", node.PKILisAddr, err)
+		time.Sleep(2 * time.Second)
+	}
+
+	for err != nil && tried < 10 {
+
+		node.PKIListener, err = tls.Listen("tcp", node.PKILisAddr, node.PKITLSConfAsServer)
+		if err != nil {
+			fmt.Printf("Failed to listen on PKI socket %s (will try again): %v\n", node.PKILisAddr, err)
+			time.Sleep(2 * time.Second)
+		}
+	}
+
+	if tried >= 10 {
+		fmt.Printf("Failed to listen on PKI socket %s permanently: %v\n", node.PKILisAddr, err)
 		os.Exit(1)
 	}
+
 	defer node.PKIListener.Close()
 
 	// Wait for and act upon messages from PKI.
@@ -151,7 +168,7 @@ func main() {
 			// Open socket for incoming mix-net messages.
 			mix.PubListener, err = tls.Listen("tcp", mix.PubLisAddr, mix.CurPubTLSConfAsServer)
 			if err != nil {
-				fmt.Printf("Failed to listen for mix-net messages on socket %s: %v\n", mix.PubLisAddr, err)
+				fmt.Printf("Failed to listen on mix-net socket %s: %v\n", mix.PubLisAddr, err)
 				os.Exit(1)
 			}
 
@@ -196,7 +213,7 @@ func main() {
 			// Open socket for incoming mix-net messages.
 			client.PubListener, err = tls.Listen("tcp", client.PubLisAddr, client.CurPubTLSConfAsServer)
 			if err != nil {
-				fmt.Printf("Failed to listen for mix-net messages on socket %s: %v\n", client.PubLisAddr, err)
+				fmt.Printf("Failed to listen on mix-net socket %s: %v\n", client.PubLisAddr, err)
 				client.muUpdState.Unlock()
 				os.Exit(1)
 			}
