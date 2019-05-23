@@ -255,30 +255,10 @@ func (cl *Client) SendMsg() {
 			for mix := range cl.CurCascadesMatrix[chain] {
 
 				cascadesMatrix[chain][mix] = &FlatEndpoint{
-					cl.CurCascadesMatrix[chain][mix].Addr,
-					*cl.CurCascadesMatrix[chain][mix].PubKey,
-					*cl.CurCascadesMatrix[chain][mix].PubCertPool,
-				}
-			}
-		}
-
-		// Extract values for this message transmission.
-		var partner string
-		var convoID string
-
-		for i := range cl.CurClients {
-
-			if cl.CurClients[i].Addr == cl.PubLisAddr {
-
-				// If own index is even, partnering client
-				// is the next one. If it is odd, the partner
-				// is the preceding client.
-				if (i % 2) == 0 {
-					partner = cl.CurClients[(i + 1)].Addr
-					convoID = fmt.Sprintf("%05d=>%05d", (i + 1), (i + 2))
-				} else {
-					partner = cl.CurClients[(i - 1)].Addr
-					convoID = fmt.Sprintf("%05d=>%05d", (i + 1), i)
+					Name:        cl.CurCascadesMatrix[chain][mix].Name,
+					Addr:        cl.CurCascadesMatrix[chain][mix].Addr,
+					PubKey:      *cl.CurCascadesMatrix[chain][mix].PubKey,
+					PubCertPool: *cl.CurCascadesMatrix[chain][mix].PubCertPool,
 				}
 			}
 		}
@@ -303,21 +283,21 @@ func (cl *Client) SendMsg() {
 			os.Exit(1)
 		}
 
-		// First 12 bytes will be conversation ID.
-		copy(msg[:], convoID)
+		// Bytes [0, 25] will be conversation ID.
+		copy(msg[:], fmt.Sprintf("%s=>%s", cl.Name, cl.Partner.Name))
 
-		// Bytes 13 - 17 are the message sequence number.
-		copy(msg[12:], fmt.Sprintf("%05d", msgID))
+		// Bytes [26, 30] are the message sequence number.
+		copy(msg[26:], fmt.Sprintf("%05d", msgID))
 
-		// Bytes 18 - MsgLength are the actual message.
-		copy(msg[17:], Msg)
+		// Bytes [31, MsgLength] are the actual message.
+		copy(msg[31:], Msg)
 
 		retChan := make(chan *ClientSendResult)
 
 		// In parallel, reverse onion-encrypt the
 		// message and send to all entry mixes.
 		for chain := range cascadesMatrix {
-			go OnionEncryptAndSend(retChan, msg, partner, cascadesMatrix[chain], keyState[chain])
+			go OnionEncryptAndSend(retChan, msg, cl.Partner.Addr, cascadesMatrix[chain], keyState[chain])
 		}
 
 		succeeded := false
@@ -361,7 +341,7 @@ func (cl *Client) SendMsg() {
 				// In case we are evaluating this client, send
 				// the measurement line to collector sidecar.
 				if cl.IsEval {
-					fmt.Fprintf(cl.MetricsPipe, "send;%d %s %s\n", retState.Time, msg[:12], msg[12:17])
+					fmt.Fprintf(cl.MetricsPipe, "send;%d %s %s\n", retState.Time, msg[:26], msg[26:31])
 				}
 			}
 		}
@@ -431,19 +411,20 @@ func (cl *Client) RunRounds() {
 			if !bytes.Equal(msg[0:28], []byte("COVER MESSAGE PLEASE DISCARD")) {
 
 				// Check dedup map for previous encounter.
-				_, seenBefore := recvdMsgs[string(msg[:17])]
+				_, seenBefore := recvdMsgs[string(msg[:31])]
 				if !seenBefore {
 
 					// Update message tracker.
-					recvdMsgs[string(msg[:17])] = true
+					recvdMsgs[string(msg[:31])] = true
 
 					// Print received message.
-					fmt.Printf("@%s> %s\n", msg[12:17], msg[17:])
+					fmt.Printf("@%s> %s\n", msg[26:31], msg[31:])
 
 					// Send prepared measurement log line to
 					// collector sidecar.
 					if cl.IsEval {
-						fmt.Fprintf(cl.MetricsPipe, "recv;%d %s %s\n", recvTime, string(msg[:12]), string(msg[12:17]))
+						fmt.Fprintf(cl.MetricsPipe, "recv;%d\n", recvTime)
+						fmt.Fprintf(cl.MetricsPipe, "recv;%s %s\n", string(msg[:26]), string(msg[26:31]))
 					}
 				}
 			}

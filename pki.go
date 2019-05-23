@@ -48,6 +48,7 @@ func (node *Node) RegisterAtPKI(category uint8) error {
 		// this node under specified category at PKI.
 		err = encoder.Encode(&PKIRegistration{
 			Category:       category,
+			Name:           node.Name,
 			PubAddr:        node.PubLisAddr,
 			PubKey:         node.NextRecvPubKey,
 			PubCertPEM:     node.NextPubCertPEM,
@@ -103,7 +104,7 @@ func (node *Node) ElectMixes(data []string) error {
 		// Parse contained public key in hex
 		// representation to byte slice.
 		pubKey := new([32]byte)
-		pubKeyRaw, err := hex.DecodeString(candsParts[1])
+		pubKeyRaw, err := hex.DecodeString(candsParts[2])
 		if err != nil {
 			return err
 		}
@@ -111,7 +112,7 @@ func (node *Node) ElectMixes(data []string) error {
 
 		// Parse contained TLS certificate in
 		// hex representation to byte slice.
-		pubCertPEM, err := hex.DecodeString(candsParts[2])
+		pubCertPEM, err := hex.DecodeString(candsParts[3])
 		if err != nil {
 			return err
 		}
@@ -126,7 +127,8 @@ func (node *Node) ElectMixes(data []string) error {
 		}
 
 		cands[i] = &Endpoint{
-			Addr:        candsParts[0],
+			Name:        candsParts[0],
+			Addr:        candsParts[1],
 			PubKey:      pubKey,
 			PubCertPool: certPool,
 		}
@@ -138,7 +140,8 @@ func (node *Node) ElectMixes(data []string) error {
 		return fmt.Errorf("received candidates set of unexpected length, saw: %d, expected: %d", len(cands), (NumCascades * LenCascade))
 	}
 
-	// Sort candidates deterministically.
+	// Sort candidates deterministically by
+	// their public key address.
 	sort.Slice(cands, func(i, j int) bool {
 		return cands[i].Addr < cands[j].Addr
 	})
@@ -221,9 +224,9 @@ func (node *Node) ElectMixes(data []string) error {
 		for j := range node.NextCascadesMatrix[i] {
 
 			if j == (len(node.NextCascadesMatrix[i]) - 1) {
-				fmt.Printf("%s", node.NextCascadesMatrix[i][j].Addr)
+				fmt.Printf("%s@%s", node.NextCascadesMatrix[i][j].Name, node.NextCascadesMatrix[i][j].Addr)
 			} else {
-				fmt.Printf("%s => ", node.NextCascadesMatrix[i][j].Addr)
+				fmt.Printf("%s@%s => ", node.NextCascadesMatrix[i][j].Name, node.NextCascadesMatrix[i][j].Addr)
 			}
 		}
 		fmt.Printf("\n")
@@ -251,7 +254,7 @@ func (node *Node) ParseClients(data []string) error {
 		// Parse contained public key in hex
 		// representation to byte slice.
 		pubKey := new([32]byte)
-		pubKeyRaw, err := hex.DecodeString(clientParts[1])
+		pubKeyRaw, err := hex.DecodeString(clientParts[2])
 		if err != nil {
 			return err
 		}
@@ -259,7 +262,7 @@ func (node *Node) ParseClients(data []string) error {
 
 		// Parse contained TLS certificate in
 		// hex representation to byte slice.
-		pubCertPEM, err := hex.DecodeString(clientParts[2])
+		pubCertPEM, err := hex.DecodeString(clientParts[3])
 		if err != nil {
 			return err
 		}
@@ -275,25 +278,30 @@ func (node *Node) ParseClients(data []string) error {
 
 		// Add as new Endpoint to slice of clients.
 		clients[i] = &Endpoint{
-			Addr:        clientParts[0],
+			Name:        clientParts[0],
+			Addr:        clientParts[1],
 			PubKey:      pubKey,
 			PubCertPool: certPool,
 		}
 	}
 
-	// Sort clients deterministically.
-	sort.Slice(clients, func(i, j int) bool {
-		return clients[i].Addr < clients[j].Addr
-	})
-
 	// Set internal clients structure to created one.
 	node.NextClients = clients
 	node.NextClientsByAddress = make(map[string]int)
 
-	// Add index into slice for each client under
-	// its address to map.
 	for i := range node.NextClients {
+
+		// Add index into slice for each client
+		// under its address to map.
 		node.NextClientsByAddress[node.NextClients[i].Addr] = i
+
+		if node.NextClients[i].Name == node.Partner.Name {
+
+			// In case we pass by the designated conversation
+			// partner of this node, fill up the partner structure.
+			node.Partner = node.NextClients[i]
+			fmt.Printf("Found partner of this node: '%s'@'%s' => '%x'\n", node.Partner.Name, node.Partner.Addr, node.Partner.PubKey)
+		}
 	}
 
 	return nil

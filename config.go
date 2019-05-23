@@ -8,7 +8,7 @@ const EpochBrick = 5 * time.Second
 
 // RoundTime specifies the per-mix
 // duration of accepting messages.
-const RoundTime = 15 * time.Second
+const RoundTime = 10 * time.Second
 
 // BatchSizeVariance defines the maximum
 // amount of messages added additionally
@@ -28,7 +28,7 @@ const LenCascade = 7
 // MsgLength defines the number of bytes
 // the content of each conversation message
 // will take up in space.
-const MsgLength = 224
+const MsgLength = 256
 
 // MsgExitOverhead defines the number of
 // additional bytes for a conversation

@@ -19,27 +19,40 @@ func init() {
 func main() {
 
 	// Allow for and require various arguments.
-	isClientFlag := flag.Bool("client", false, "Append this flag on a node representing a client of the mix-net.")
 	isMixFlag := flag.Bool("mix", false, "Append this flag on a node intended for mix responsibilities (might still become regular client).")
+	isClientFlag := flag.Bool("client", false, "Append this flag on a node representing a client of the mix-net.")
+	nameFlag := flag.String("name", "", "Supply the name of this node.")
+	partnerFlag := flag.String("partner", "", "Supply the name of this node's conversation partner.")
 	msgPublicAddrFlag := flag.String("msgPublicAddr", "127.0.0.1:33000", "Specify on which ip:port address this node is going to be publicly addressable.")
 	msgLisAddrFlag := flag.String("msgLisAddr", "0.0.0.0:33000", "Specify on which ip:port address for this node to listen for messages.")
 	pkiLisAddrFlag := flag.String("pkiLisAddr", "0.0.0.0:44000", "Specify on which ip:port address for this node to listen for PKI information.")
 	pkiAddrFlag := flag.String("pki", "1.1.1.1:33000", "Provide ip:port address string of PKI for mix-net.")
 	pkiCertPathFlag := flag.String("pkiCertPath", filepath.Join(os.Getenv("GOPATH"), "src/github.com/numbleroot/zeno-pki/cert.pem"), "Specify file system path to PKI server TLS certificate.")
-	isEvalFlag := flag.Bool("eval", false, "Append this flag to write evaluation output to files '/tmp/zeno_client_send.evaluation' and '/tmp/zeno_client_recv.evaluation'")
+	isEvalFlag := flag.Bool("eval", false, "Append this flag to write evaluation metrics out to a collector process.")
 	numMsgToRecvFlag := flag.Int("numMsgToRecv", -1, "Specify how many messages a '-client' is supposed to receive before exiting, -1 disables this limit.")
 	metricsPipeFlag := flag.String("metricsPipe", "/tmp/collect", "Specify the named pipe to use for IPC with the collector sidecar.")
 
 	flag.Parse()
 
-	// Enforce either client or mix designation.
 	if *isClientFlag == *isMixFlag {
 		fmt.Printf("Please identify node as either '-client' or '-mix'.\n")
 		os.Exit(1)
 	}
 
-	isClient := *isClientFlag
+	if *nameFlag == "" {
+		fmt.Printf("Zeno nodes need to be given a name ('-name').\n")
+		os.Exit(1)
+	}
+
+	if *partnerFlag == "" {
+		fmt.Printf("Zeno nodes need to be assigned a conversation partner to potentially exchange messages with ('-partner').\n")
+		os.Exit(1)
+	}
+
 	isMix := *isMixFlag
+	isClient := *isClientFlag
+	name := *nameFlag
+	partner := *partnerFlag
 	msgPublicAddr := *msgPublicAddrFlag
 	msgLisAddr := *msgLisAddrFlag
 	pkiLisAddr := *pkiLisAddrFlag
@@ -69,6 +82,8 @@ func main() {
 	}
 
 	node := &Node{
+		Name:               name,
+		Partner:            &Endpoint{Name: partner},
 		PubLisAddr:         msgLisAddr,
 		PKIAddr:            pkiAddr,
 		PKILisAddr:         pkiLisAddr,

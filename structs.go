@@ -16,6 +16,7 @@ import (
 // various categories with the PKI.
 type PKIRegistration struct {
 	Category       uint8
+	Name           string
 	PubAddr        string
 	PubKey         *[32]byte
 	PubCertPEM     []byte
@@ -27,6 +28,7 @@ type PKIRegistration struct {
 // entity on address associated with a
 // public key.
 type Endpoint struct {
+	Name        string
 	Addr        string
 	PubKey      *[32]byte
 	PubCertPool *x509.CertPool
@@ -36,6 +38,7 @@ type Endpoint struct {
 // except that it stores values instead
 // of references.
 type FlatEndpoint struct {
+	Name        string
 	Addr        string
 	PubKey      [32]byte
 	PubCertPool x509.CertPool
@@ -64,6 +67,8 @@ type ConvoMsg struct {
 // Node collects the basic information
 // any node in our system works with.
 type Node struct {
+	Name                   string
+	Partner                *Endpoint
 	PubLisAddr             string
 	PubListener            net.Listener
 	CurRecvPubKey          *[32]byte
