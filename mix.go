@@ -53,42 +53,142 @@ func (mix *Mix) SetOwnPlace() {
 		}
 	}
 
-	fmt.Printf("%s:  OwnChain=%v, OwnIndex=%v, IsEntry=%v, IsExit=%v\n", mix.PubLisAddr, mix.OwnChain, mix.OwnIndex, mix.IsEntry, mix.IsExit)
+	fmt.Printf("%s@%s:  OwnChain=%v, OwnIndex=%v, IsEntry=%v, IsExit=%v\n", mix.Name, mix.PubLisAddr, mix.OwnChain, mix.OwnIndex, mix.IsEntry, mix.IsExit)
 }
 
 // ReconnectToSuccessor establishes a connection
 // from a non-exit mix to its successor mix.
 func (mix *Mix) ReconnectToSuccessor() error {
 
-	if !mix.IsExit {
+	// Extract next-in-cascade mix.
+	successor := mix.CurCascadesMatrix[mix.OwnChain][(mix.OwnIndex + 1)]
 
-		// Extract next-in-cascade mix.
-		successor := mix.CurCascadesMatrix[mix.OwnChain][(mix.OwnIndex + 1)]
-
-		// Prepare TLS config.
-		tlsConf := &tls.Config{
-			RootCAs:            successor.PubCertPool,
-			InsecureSkipVerify: false,
-			MinVersion:         tls.VersionTLS13,
-			CurvePreferences:   []tls.CurveID{tls.X25519},
-		}
-
-		// Dial successor mix.
-		conn, err := tls.Dial("tcp", successor.Addr, tlsConf)
-		for err != nil {
-
-			fmt.Printf("Reconnecting to successor failed with: %v\n", err)
-			fmt.Printf("Trying again...\n")
-
-			conn, err = tls.Dial("tcp", successor.Addr, tlsConf)
-		}
-
-		fmt.Printf("Success! Reconnected to %s!\n", successor.Addr)
-
-		mix.Successor = conn
+	// Prepare TLS config.
+	tlsConf := &tls.Config{
+		RootCAs:            successor.PubCertPool,
+		InsecureSkipVerify: false,
+		MinVersion:         tls.VersionTLS13,
+		CurvePreferences:   []tls.CurveID{tls.X25519},
 	}
 
+	// Dial successor mix.
+	conn, err := tls.Dial("tcp", successor.Addr, tlsConf)
+	for err != nil {
+
+		fmt.Printf("Reconnecting to successor failed with: %v\n", err)
+		fmt.Printf("Trying again...\n")
+
+		conn, err = tls.Dial("tcp", successor.Addr, tlsConf)
+	}
+
+	fmt.Printf("Success! Reconnected to %s!\n", successor.Addr)
+
+	mix.Successor = conn
+
 	return nil
+}
+
+// SendMsgToClient is the dedicated process tasked
+// with first connecting to one specific client via
+// TLS-over-TCP and second to send the client all
+// messages passed in via the supplied channel.
+func (mix *Mix) SendMsgToClient(client *Endpoint, msgChan chan []byte) {
+
+	tlsConf := &tls.Config{
+		RootCAs:            client.PubCertPool,
+		InsecureSkipVerify: false,
+		MinVersion:         tls.VersionTLS13,
+		CurvePreferences:   []tls.CurveID{tls.X25519},
+	}
+
+	// Connect to client node.
+Reconnect:
+
+	tried := 0
+	connWrite, err := tls.Dial("tcp", client.Addr, tlsConf)
+	for err != nil && tried < 3 {
+
+		// If attempt at reaching client failed,
+		// wait a short amount of time and try again.
+		time.Sleep(300 * time.Millisecond)
+
+		connWrite, err = tls.Dial("tcp", client.Addr, tlsConf)
+		tried++
+	}
+	if err != nil {
+		fmt.Printf("Exit mix unable to reach %s (tried 3 times)\n", client.Addr)
+		return
+	}
+	encoder := gob.NewEncoder(connWrite)
+
+	for msg := range msgChan {
+
+		// Send message to client via previously
+		// established connection.
+		err := encoder.Encode(msg)
+		if err != nil {
+
+			fmt.Printf("Failed to send msg to client %s: %v\n", client.Addr, err)
+
+			if strings.Contains(err.Error(), "connection reset by peer") ||
+				strings.Contains(err.Error(), "broken pipe") {
+
+				fmt.Printf("Detected broken pipe to client %s. Will reconnect.\n", client.Addr)
+				goto Reconnect
+			}
+		}
+	}
+}
+
+// ReconnectToClients quickly creates a channel
+// that a dedicated sending goroutine acts upon
+// into which outgoing messages are placed by
+// ForwardMsgToSender.
+func (mix *Mix) ReconnectToClients() {
+
+	mix.CurClientsByAddress = make(map[string]chan []byte)
+
+	for i := range mix.CurClients {
+
+		// Create a channel that messages can be
+		// passed over intended for delivery to
+		// this specific client.
+		clientConnChan := make(chan []byte)
+
+		// Stash channel in map that allows SendOutMsg
+		// to find the goroutine tasked with sending
+		// messages to clients quickly.
+		mix.CurClientsByAddress[mix.CurClients[i].Addr] = clientConnChan
+
+		go mix.SendMsgToClient(mix.CurClients[i], clientConnChan)
+	}
+}
+
+// ForwardMsgToSender hands off an outgoing message
+// to the routine responsible for that client based
+// on the recipient address attached to it.
+func (mix *Mix) ForwardMsgToSender(msgChan chan *rpc.ConvoMsg) {
+
+	for exitMsg := range msgChan {
+
+		// Extract network address of outside client.
+		addrRaw, err := exitMsg.PubKeyOrAddr()
+		if err != nil {
+			fmt.Printf("Failed to extract client address of outgoing message: %v\n", err)
+			continue
+		}
+		addr := strings.Split(string(addrRaw), "#")[0]
+
+		// Extract message to send.
+		msg, err := exitMsg.Content()
+		if err != nil {
+			fmt.Printf("Failed to extract outgoing message: %v\n", err)
+			continue
+		}
+
+		// Pass message to correct client channel.
+		mix.CurClientsByAddress[addr] <- msg
+	}
 }
 
 // AddCoverMsgsToPool ensures that a reasonable
@@ -322,61 +422,6 @@ func (mix *Mix) InitNewRound() error {
 	return nil
 }
 
-// SendOutMsg is the goroutine worker function
-// that expects messages via a channel and sends
-// them to the final outside client.
-func (mix *Mix) SendOutMsg(msgChan chan *rpc.ConvoMsg) {
-
-	for exitMsg := range msgChan {
-
-		// Extract network address of outside client.
-		addrRaw, err := exitMsg.PubKeyOrAddr()
-		if err != nil {
-			fmt.Printf("Failed to extract client address of outgoing message: %v\n", err)
-			continue
-		}
-		addrParts := strings.Split(string(addrRaw), "#")
-
-		// Find local endpoint mapped to address.
-		clIdx, found := mix.CurClientsByAddress[addrParts[0]]
-		if !found {
-			fmt.Printf("Client to contact not known (no TLS certificate available).\n")
-			continue
-		}
-		client := mix.CurClients[clIdx]
-
-		// Extract message to send.
-		msg, err := exitMsg.Content()
-		if err != nil {
-			fmt.Printf("Failed to extract outgoing message: %v\n", err)
-			continue
-		}
-
-		// Connect to client node.
-		connWrite, err := tls.DialWithDialer(&net.Dialer{
-			Deadline: time.Now().Add(RoundTime),
-		}, "tcp", addrParts[0], &tls.Config{
-			RootCAs:            client.PubCertPool,
-			InsecureSkipVerify: false,
-			MinVersion:         tls.VersionTLS13,
-			CurvePreferences:   []tls.CurveID{tls.X25519},
-		})
-		if err != nil {
-			fmt.Printf("Could not connect to client %s via TLS: %v\n", addrParts[0], err)
-			continue
-		}
-		defer connWrite.Close()
-		encoder := gob.NewEncoder(connWrite)
-
-		// Send message content.
-		err = encoder.Encode(msg)
-		if err != nil {
-			fmt.Printf("Failed sending message to client %s: %v\n", addrParts[0], err)
-			continue
-		}
-	}
-}
-
 // CreateEvalDoneBatch has the purpose of constructing
 // a Batch of size one with the single message telling
 // the succeeding mix to complete the evaluation.
@@ -594,7 +639,7 @@ func (mix *Mix) RotateRoundState() {
 				// messages to clients.
 				msgChan := make(chan *rpc.ConvoMsg, len(mix.OutPool))
 				for i := 0; i < len(mix.OutPool); i++ {
-					go mix.SendOutMsg(msgChan)
+					go mix.ForwardMsgToSender(msgChan)
 				}
 
 				// Hand over outgoing messages to goroutines
@@ -913,15 +958,23 @@ func (mix *Mix) RunRounds() {
 	// Determine this mix node's place in cascades matrix.
 	mix.SetOwnPlace()
 
-	// Connect to each mix node's successor mix.
-	err := mix.ReconnectToSuccessor()
-	if err != nil {
-		fmt.Printf("Failed to connect to mix node's successor mix: %v\n", err)
-		os.Exit(1)
+	if mix.IsExit {
+
+		// Connect to all known clients.
+		mix.ReconnectToClients()
+
+	} else {
+
+		// Connect to each mix node's successor mix.
+		err := mix.ReconnectToSuccessor()
+		if err != nil {
+			fmt.Printf("Failed to connect to mix node's successor mix: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	// Initialize state on mix for upcoming round.
-	err = mix.InitNewRound()
+	err := mix.InitNewRound()
 	if err != nil {
 		fmt.Printf("Failed generating cover traffic messages for pool: %v\n", err)
 		os.Exit(1)

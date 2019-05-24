@@ -173,7 +173,6 @@ func main() {
 			mix.CurPubCertPEM = mix.NextPubCertPEM
 			mix.CurCascadesMatrix = mix.NextCascadesMatrix
 			mix.CurClients = mix.NextClients
-			mix.CurClientsByAddress = mix.NextClientsByAddress
 			mix.OwnChain = -1
 			mix.OwnIndex = -1
 			mix.IsEntry = false
@@ -223,7 +222,6 @@ func main() {
 			client.CurPubCertPEM = client.NextPubCertPEM
 			client.CurCascadesMatrix = client.NextCascadesMatrix
 			client.CurClients = client.NextClients
-			client.CurClientsByAddress = client.NextClientsByAddress
 
 			// Open socket for incoming mix-net messages.
 			client.PubListener, err = tls.Listen("tcp", client.PubLisAddr, client.CurPubTLSConfAsServer)

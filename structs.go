@@ -92,9 +92,8 @@ type Node struct {
 	CurCascadesMatrix      [][]*Endpoint
 	NextCascadesMatrix     [][]*Endpoint
 	CurClients             []*Endpoint
-	CurClientsByAddress    map[string]int
+	CurClientsByAddress    map[string]chan []byte
 	NextClients            []*Endpoint
-	NextClientsByAddress   map[string]int
 	IsEval                 bool
 	MetricsPipe            *os.File
 }

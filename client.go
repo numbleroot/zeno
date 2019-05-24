@@ -369,6 +369,14 @@ func (cl *Client) RunRounds() {
 	// Handle messaging loop.
 	go cl.SendMsg()
 
+	// Wait for incoming connection on public socket.
+	connWrite, err := cl.PubListener.Accept()
+	if err != nil {
+		fmt.Printf("Public connection error: %v\n", err)
+		os.Exit(1)
+	}
+	decoder := gob.NewDecoder(connWrite)
+
 	for {
 
 		select {
@@ -383,29 +391,16 @@ func (cl *Client) RunRounds() {
 
 		default:
 
-			// Wait for incoming connections on public socket.
-			connWrite, err := cl.PubListener.Accept()
-			if err != nil {
-				fmt.Printf("Public connection error: %v\n", err)
-				continue
-			}
-			decoder := gob.NewDecoder(connWrite)
-
 			// Wait for a message.
 			var msg []byte
 			err = decoder.Decode(&msg)
 			if err != nil {
-				connWrite.Close()
 				fmt.Printf("Failed decoding incoming message as slice of bytes: %v\n", err)
 				continue
 			}
 
 			// Save receive time.
 			recvTime := time.Now().UnixNano()
-
-			// Close connection once the incoming
-			// message has been read.
-			connWrite.Close()
 
 			// Do not consider cover traffic messages.
 			if !bytes.Equal(msg[0:28], []byte("COVER MESSAGE PLEASE DISCARD")) {

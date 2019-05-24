@@ -287,20 +287,15 @@ func (node *Node) ParseClients(data []string) error {
 
 	// Set internal clients structure to created one.
 	node.NextClients = clients
-	node.NextClientsByAddress = make(map[string]int)
 
 	for i := range node.NextClients {
-
-		// Add index into slice for each client
-		// under its address to map.
-		node.NextClientsByAddress[node.NextClients[i].Addr] = i
 
 		if node.NextClients[i].Name == node.Partner.Name {
 
 			// In case we pass by the designated conversation
 			// partner of this node, fill up the partner structure.
 			node.Partner = node.NextClients[i]
-			fmt.Printf("Found partner of this node: '%s'@'%s' => '%x'\n", node.Partner.Name, node.Partner.Addr, node.Partner.PubKey)
+			fmt.Printf("Found partner of this node: '%s'@'%s' => '%x'\n", node.Partner.Name, node.Partner.Addr, *node.Partner.PubKey)
 		}
 	}
 
