@@ -30,6 +30,7 @@ func main() {
 	pkiCertPathFlag := flag.String("pkiCertPath", filepath.Join(os.Getenv("GOPATH"), "src/github.com/numbleroot/zeno-pki/cert.pem"), "Specify file system path to PKI server TLS certificate.")
 	isEvalFlag := flag.Bool("eval", false, "Append this flag to write evaluation metrics out to a collector process.")
 	numMsgToRecvFlag := flag.Int("numMsgToRecv", -1, "Specify how many messages a '-client' is supposed to receive before exiting, -1 disables this limit.")
+	killMixesInRoundFlag := flag.Int("killMixesInRound", -1, "If set to a positive number, the second-in-cascade mixes from all but the first cascade will crash at the beginning of this round.")
 	metricsPipeFlag := flag.String("metricsPipe", "/tmp/collect", "Specify the named pipe to use for IPC with the collector sidecar.")
 
 	flag.Parse()
@@ -60,6 +61,7 @@ func main() {
 	pkiCertPath := *pkiCertPathFlag
 	isEval := *isEvalFlag
 	numMsgToRecv := *numMsgToRecvFlag
+	killMixesInRound := *killMixesInRoundFlag
 	metricsPipe := *metricsPipeFlag
 
 	// Generate ephemeral TLS certificate and config
@@ -85,15 +87,15 @@ func main() {
 		Name:               name,
 		Partner:            &Endpoint{Name: partner},
 		PubLisAddr:         msgLisAddr,
+		SigRotateEpoch:     make(chan struct{}),
+		SigCloseEpoch:      make(chan struct{}),
+		SigMixesElected:    make(chan struct{}),
+		SigClientsAdded:    make(chan struct{}),
 		PKIAddr:            pkiAddr,
 		PKILisAddr:         pkiLisAddr,
 		PKITLSConfAsClient: pkiTLSConfAsClient,
 		PKITLSConfAsServer: pkiTLSConfAsServer,
 		PKICertPEM:         pkiCertPEM,
-		SigRotateEpoch:     make(chan struct{}),
-		SigCloseEpoch:      make(chan struct{}),
-		SigMixesElected:    make(chan struct{}),
-		SigClientsAdded:    make(chan struct{}),
 		IsEval:             isEval,
 	}
 
@@ -137,7 +139,8 @@ func main() {
 	go node.AcceptMsgsFromPKI()
 
 	mix := &Mix{
-		Node: node,
+		Node:             node,
+		KillMixesInRound: killMixesInRound,
 	}
 
 	client := &Client{
@@ -167,6 +170,7 @@ func main() {
 			// Swap state prepared for upcoming epoch
 			// into places for current epoch, and reset
 			// mix state from prior round.
+			mix.RoundCounter = 1
 			mix.CurRecvPubKey = mix.NextRecvPubKey
 			mix.CurRecvSecKey = mix.NextRecvSecKey
 			mix.CurPubTLSConfAsServer = mix.NextPubTLSConfAsServer
@@ -216,6 +220,7 @@ func main() {
 
 			// Swap state prepared for upcoming epoch
 			// into places for current epoch.
+			client.RoundCounter = 1
 			client.CurRecvPubKey = client.NextRecvPubKey
 			client.CurRecvSecKey = client.NextRecvSecKey
 			client.CurPubTLSConfAsServer = client.NextPubTLSConfAsServer

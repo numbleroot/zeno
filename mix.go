@@ -75,6 +75,10 @@ func (mix *Mix) ReconnectToSuccessor() error {
 	conn, err := tls.Dial("tcp", successor.Addr, tlsConf)
 	for err != nil {
 
+		// If attempt at reaching succeeding mix failed,
+		// wait a short amount of time and try again.
+		time.Sleep(150 * time.Millisecond)
+
 		fmt.Printf("Reconnecting to successor failed with: %v\n", err)
 		fmt.Printf("Trying again...\n")
 
@@ -494,6 +498,16 @@ func (mix *Mix) RotateRoundState() {
 		default:
 
 			<-mix.RoundTicker.C
+
+			mix.RoundCounter++
+			if (mix.KillMixesInRound != -1) && (mix.RoundCounter >= mix.KillMixesInRound) &&
+				(mix.OwnChain > 0) && (mix.OwnIndex == 1) {
+
+				// Crash second-in-cascade mixes in all but first cascade
+				// when configured round to crash was reached.
+				fmt.Printf("This is a second-in-cascade mix in a non-first cascade - exiting!\n")
+				os.Exit(0)
+			}
 
 			numClients := len(mix.CurClients)
 			numSamples := numClients / 100

@@ -71,6 +71,11 @@ type Node struct {
 	Partner                *Endpoint
 	PubLisAddr             string
 	PubListener            net.Listener
+	RoundCounter           int
+	SigRotateEpoch         chan struct{}
+	SigCloseEpoch          chan struct{}
+	SigMixesElected        chan struct{}
+	SigClientsAdded        chan struct{}
 	CurRecvPubKey          *[32]byte
 	CurRecvSecKey          *[32]byte
 	CurPubTLSConfAsServer  *tls.Config
@@ -85,10 +90,6 @@ type Node struct {
 	PKITLSConfAsServer     *tls.Config
 	PKICertPEM             []byte
 	PKIListener            net.Listener
-	SigRotateEpoch         chan struct{}
-	SigCloseEpoch          chan struct{}
-	SigMixesElected        chan struct{}
-	SigClientsAdded        chan struct{}
 	CurCascadesMatrix      [][]*Endpoint
 	NextCascadesMatrix     [][]*Endpoint
 	CurClients             []*Endpoint
@@ -111,19 +112,20 @@ type Client struct {
 // system architecture.
 type Mix struct {
 	*Node
-	OwnChain    int
-	OwnIndex    int
-	IsEntry     bool
-	IsExit      bool
-	Successor   *tls.Conn
-	RoundTicker *time.Ticker
-	muAddMsgs   *sync.Mutex
-	ClientsSeen map[string]bool
-	FirstPool   []*rpc.ConvoMsg
-	SecPool     []*rpc.ConvoMsg
-	ThirdPool   []*rpc.ConvoMsg
-	NextPool    []*rpc.ConvoMsg
-	OutPool     []*rpc.ConvoMsg
+	OwnChain         int
+	OwnIndex         int
+	IsEntry          bool
+	IsExit           bool
+	Successor        *tls.Conn
+	RoundTicker      *time.Ticker
+	muAddMsgs        *sync.Mutex
+	ClientsSeen      map[string]bool
+	FirstPool        []*rpc.ConvoMsg
+	SecPool          []*rpc.ConvoMsg
+	ThirdPool        []*rpc.ConvoMsg
+	NextPool         []*rpc.ConvoMsg
+	OutPool          []*rpc.ConvoMsg
+	KillMixesInRound int
 }
 
 // ClientSendResult is used by the sending
