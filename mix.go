@@ -499,6 +499,7 @@ func (mix *Mix) RotateRoundState() {
 
 			<-mix.RoundTicker.C
 
+			// Move round counter to next round.
 			mix.RoundCounter++
 			if (mix.KillMixesInRound != -1) && (mix.RoundCounter >= mix.KillMixesInRound) &&
 				(mix.OwnChain > 0) && (mix.OwnIndex == 1) {
@@ -528,7 +529,7 @@ func (mix *Mix) RotateRoundState() {
 
 				// If we are conducting an evaluation,
 				// send pool sizes to collector sidecar.
-				fmt.Fprintf(mix.MetricsPipe, "%d 1st:%d 2nd:%d 3rd:%d out:%d\n", time.Now().Unix(),
+				fmt.Fprintf(mix.MetricsPipe, "%d 1st:%d 2nd:%d 3rd:%d out:%d\n", mix.RoundCounter,
 					len(mix.FirstPool), len(mix.SecPool), len(mix.ThirdPool), len(mix.OutPool))
 
 				if mix.IsEntry && (len(mix.ClientsSeen) == 0) {
@@ -992,6 +993,16 @@ func (mix *Mix) RunRounds() {
 	if err != nil {
 		fmt.Printf("Failed generating cover traffic messages for pool: %v\n", err)
 		os.Exit(1)
+	}
+
+	if mix.IsEval {
+
+		// If we are conducting an evaluation, send pool
+		// size for first round to collector sidecar. For
+		// subsequent rounds, RotateRoundState will take
+		// care of sending out the metrics.
+		fmt.Fprintf(mix.MetricsPipe, "%d 1st:%d 2nd:%d 3rd:%d out:%d\n", mix.RoundCounter,
+			len(mix.FirstPool), len(mix.SecPool), len(mix.ThirdPool), len(mix.OutPool))
 	}
 
 	// Run mix node part of mix-net round
