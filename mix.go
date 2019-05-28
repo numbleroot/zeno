@@ -107,21 +107,16 @@ func (mix *Mix) SendMsgToClient(client *Endpoint, msgChan chan []byte) {
 
 	// Connect to client node.
 Reconnect:
-
-	tried := 0
 	connWrite, err := tls.Dial("tcp", client.Addr, tlsConf)
-	for err != nil && tried < 3 {
+	for err != nil {
+
+		fmt.Printf("Exit mix unable to reach %s (will try again...)\n", client.Addr)
 
 		// If attempt at reaching client failed,
 		// wait a short amount of time and try again.
-		time.Sleep(300 * time.Millisecond)
+		time.Sleep(150 * time.Millisecond)
 
 		connWrite, err = tls.Dial("tcp", client.Addr, tlsConf)
-		tried++
-	}
-	if err != nil {
-		fmt.Printf("Exit mix unable to reach %s (tried 3 times)\n", client.Addr)
-		return
 	}
 	encoder := gob.NewEncoder(connWrite)
 
@@ -532,9 +527,18 @@ func (mix *Mix) RotateRoundState() {
 				fmt.Fprintf(mix.MetricsPipe, "%d 1st:%d 2nd:%d 3rd:%d out:%d\n", mix.RoundCounter,
 					len(mix.FirstPool), len(mix.SecPool), len(mix.ThirdPool), len(mix.OutPool))
 
+				if mix.IsEntry && len(mix.ClientsSeen) < 10 {
+
+					fmt.Printf("len(ClientsSeen) = %d\n", len(mix.ClientsSeen))
+					for i := range mix.ClientsSeen {
+						fmt.Printf("\t%s => %v\n", i, mix.ClientsSeen[i])
+					}
+					fmt.Println()
+				}
+
 				if mix.IsEntry && (len(mix.ClientsSeen) == 0) {
 
-					// In case the clients have ceased sending due
+					// In case the clients have ceased sending due to
 					// having seen the amount of messages they were
 					// configured to await, signal collector sidecar
 					// that we are done sending metrics.
