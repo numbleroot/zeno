@@ -145,8 +145,9 @@ func main() {
 
 	client := &Client{
 		Node:         node,
-		muUpdState:   &sync.RWMutex{},
 		NumMsgToRecv: numMsgToRecv,
+		muUpdState:   &sync.RWMutex{},
+		muNewMsg:     &sync.Mutex{},
 	}
 
 	// Prepare the upcoming epoch by electing
@@ -184,9 +185,19 @@ func main() {
 			mix.Successor = nil
 
 			// Open socket for incoming mix-net messages.
+			tried := 1
 			mix.PubListener, err = tls.Listen("tcp", mix.PubLisAddr, mix.CurPubTLSConfAsServer)
+			for err != nil && tried <= 10 {
+
+				fmt.Printf("Failed %d times to listen on mix-net socket %s (will try again): %v\n", tried, mix.PubLisAddr, err)
+
+				tried++
+				time.Sleep(200 * time.Millisecond)
+
+				mix.PubListener, err = tls.Listen("tcp", mix.PubLisAddr, mix.CurPubTLSConfAsServer)
+			}
 			if err != nil {
-				fmt.Printf("Failed to listen on mix-net socket %s: %v\n", mix.PubLisAddr, err)
+				fmt.Printf("Failed permanently to listen on mix-net socket %s (%d times): %v\n", mix.PubLisAddr, tried, err)
 				os.Exit(1)
 			}
 
@@ -214,6 +225,7 @@ func main() {
 		} else {
 
 			client.muUpdState.Lock()
+			client.muNewMsg.Lock()
 
 			// Mark node as client (again).
 			client.IsClient = true
@@ -229,14 +241,29 @@ func main() {
 			client.CurClients = client.NextClients
 
 			// Open socket for incoming mix-net messages.
+			tried := 1
 			client.PubListener, err = tls.Listen("tcp", client.PubLisAddr, client.CurPubTLSConfAsServer)
+			for err != nil && tried <= 10 {
+
+				fmt.Printf("Failed %d times to listen on mix-net socket %s (will try again): %v\n", tried, client.PubLisAddr, err)
+
+				tried++
+				time.Sleep(200 * time.Millisecond)
+
+				client.PubListener, err = tls.Listen("tcp", client.PubLisAddr, client.CurPubTLSConfAsServer)
+			}
 			if err != nil {
-				fmt.Printf("Failed to listen on mix-net socket %s: %v\n", client.PubLisAddr, err)
+				fmt.Printf("Failed permanently to listen on mix-net socket %s (%d times): %v\n", client.PubLisAddr, tried, err)
 				client.muUpdState.Unlock()
+				client.muNewMsg.Unlock()
 				os.Exit(1)
 			}
 
+			client.RecvdMsgs = make(map[string]bool)
+			client.DoneCounter = 300
+
 			client.muUpdState.Unlock()
+			client.muNewMsg.Unlock()
 
 			// This node is a client. Run rounds
 			// protocol in background.
@@ -256,6 +283,11 @@ func main() {
 			// Drain old epoch state.
 			fmt.Printf("\nSending internal signal to drain epoch state\n")
 			client.SigCloseEpoch <- struct{}{}
+
+			// Close all possibly active exit mix connections.
+			for i := 0; i < len(client.CurCascadesMatrix); i++ {
+				client.SigCloseEpoch <- struct{}{}
+			}
 		}
 
 		// Close public listener.

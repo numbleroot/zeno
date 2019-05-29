@@ -77,10 +77,8 @@ func (mix *Mix) ReconnectToSuccessor() error {
 
 		// If attempt at reaching succeeding mix failed,
 		// wait a short amount of time and try again.
+		fmt.Printf("Reconnecting to successor failed with (will try again): %v\n", err)
 		time.Sleep(150 * time.Millisecond)
-
-		fmt.Printf("Reconnecting to successor failed with: %v\n", err)
-		fmt.Printf("Trying again...\n")
 
 		conn, err = tls.Dial("tcp", successor.Addr, tlsConf)
 	}
@@ -110,7 +108,7 @@ Reconnect:
 	connWrite, err := tls.Dial("tcp", client.Addr, tlsConf)
 	for err != nil {
 
-		fmt.Printf("Exit mix unable to reach %s (will try again...)\n", client.Addr)
+		fmt.Printf("Exit mix unable to reach %s (will try again)\n", client.Addr)
 
 		// If attempt at reaching client failed,
 		// wait a short amount of time and try again.
@@ -715,6 +713,11 @@ func (mix *Mix) RotateRoundState() {
 				// Encode message and send it via stream.
 				err = capnp.NewEncoder(mix.Successor).Encode(protoMsg)
 				if err != nil {
+
+					if strings.Contains(err.Error(), "broken pipe") {
+						continue
+					}
+
 					fmt.Printf("Rotating round state failed: %v\n", err)
 					os.Exit(1)
 				}
@@ -977,11 +980,9 @@ func (mix *Mix) RunRounds() {
 	// Determine this mix node's place in cascades matrix.
 	mix.SetOwnPlace()
 
+	// Connect to all known clients.
 	if mix.IsExit {
-
-		// Connect to all known clients.
 		mix.ReconnectToClients()
-
 	} else {
 
 		// Connect to each mix node's successor mix.
@@ -1032,7 +1033,7 @@ func (mix *Mix) RunRounds() {
 				// Wait for incoming connections on public socket.
 				connWrite, err := mix.PubListener.Accept()
 				if err != nil {
-					fmt.Printf("Public connection error: %v\n", err)
+					fmt.Printf("Accepting connection from a client failed: %v\n", err)
 					continue
 				}
 
@@ -1049,7 +1050,7 @@ func (mix *Mix) RunRounds() {
 		// Wait for incoming connections on public socket.
 		connWrite, err := mix.PubListener.Accept()
 		if err != nil {
-			fmt.Printf("Public connection error: %v\n", err)
+			fmt.Printf("Accepting connection from a fellow mix failed: %v\n", err)
 			os.Exit(1)
 		}
 

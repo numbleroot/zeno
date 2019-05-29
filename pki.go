@@ -12,6 +12,7 @@ import (
 	"fmt"
 	mathrand "math/rand"
 	"net"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -33,9 +34,19 @@ func (node *Node) RegisterAtPKI(category uint8) error {
 	for resp != "0" {
 
 		// Connect to PKI TLS endpoint.
+		tried := 1
 		connWrite, err := tls.Dial("tcp", node.PKIAddr, node.PKITLSConfAsClient)
+		for err != nil && tried <= 20 {
+
+			fmt.Printf("Failed %d times already to dial PKI at %s (will try again)\n", tried, node.PKIAddr)
+
+			tried++
+			time.Sleep(500 * time.Millisecond)
+
+			connWrite, err = tls.Dial("tcp", node.PKIAddr, node.PKITLSConfAsClient)
+		}
 		if err != nil {
-			return err
+			return fmt.Errorf("failed %d times to register at PKI %s: %v", tried, node.PKIAddr, err)
 		}
 		encoder := gob.NewEncoder(connWrite)
 
@@ -311,7 +322,7 @@ func (node *Node) HandleMsgFromPKI(connRead *bufio.Reader, connWrite net.Conn) {
 	dataRaw, err := connRead.ReadString('\n')
 	if err != nil {
 		fmt.Printf("Error receiving data from PKI: %v\n", err)
-		return
+		os.Exit(1)
 	}
 
 	// Split raw data at semicola. First line
@@ -328,7 +339,7 @@ func (node *Node) HandleMsgFromPKI(connRead *bufio.Reader, connWrite net.Conn) {
 		err = node.ElectMixes(data[1:])
 		if err != nil {
 			fmt.Printf("Cascades election failed: %v\n", err)
-			return
+			os.Exit(1)
 		}
 
 		// Signal completion to main routine.
@@ -342,7 +353,7 @@ func (node *Node) HandleMsgFromPKI(connRead *bufio.Reader, connWrite net.Conn) {
 		err = node.ParseClients(data[1:])
 		if err != nil {
 			fmt.Printf("Parsing received set of clients failed: %v\n", err)
-			return
+			os.Exit(1)
 		}
 
 		// Signal completion to main routine.
@@ -369,7 +380,7 @@ func (node *Node) AcceptMsgsFromPKI() {
 		connWrite, err := node.PKIListener.Accept()
 		if err != nil {
 			fmt.Printf("Error accepting connection from PKI: %v\n", err)
-			continue
+			os.Exit(1)
 		}
 		connRead := bufio.NewReader(connWrite)
 

@@ -354,63 +354,64 @@ func (cl *Client) SendMsg() {
 	}
 }
 
-// RunRounds executes all relevant components
-// of regular mix-net rounds on a client node
-// during one epoch's time.
-func (cl *Client) RunRounds() {
+// HandleExitMixConn handles the TLS connection
+// from one exit mix to this client.
+func (cl *Client) HandleExitMixConn(connWrite net.Conn) {
 
-	// Use map to deduplicate incoming messages.
-	// We only forward messages to application layer
-	// that we have not already passed on before.
-	recvdMsgs := make(map[string]bool)
-
-	clientDoneCounter := 250
-
-	// Handle messaging loop.
-	go cl.SendMsg()
-
-	// Wait for incoming connection on public socket.
-	connWrite, err := cl.PubListener.Accept()
-	if err != nil {
-		fmt.Printf("Public connection error: %v\n", err)
-		os.Exit(1)
-	}
 	decoder := gob.NewDecoder(connWrite)
+	failedDecodingMsg := 0
 
 	for {
 
 		select {
 		case <-cl.SigCloseEpoch:
 
-			fmt.Printf("\nSIG @ CLIENT RECV! Closing epoch\n")
+			fmt.Printf("\nSIG @ CLIENT HANDLE EXIT MIX! Closing epoch\n")
 
 			// In case the current epoch is wrapping
 			// up, return from this function to stop
-			// listening for client messages.
+			// handling messages.
 			return
 
 		default:
 
 			// Wait for a message.
 			var msg []byte
-			err = decoder.Decode(&msg)
+			err := decoder.Decode(&msg)
 			if err != nil {
-				fmt.Printf("Failed decoding incoming message as slice of bytes: %v\n", err)
+
+				fmt.Printf("Failed decoding incoming message from %s: %v\n", connWrite.RemoteAddr(), err)
+
+				if failedDecodingMsg >= 20 {
+					fmt.Printf("Exit mix at %s seems to have disappeared, closing connection.\n", connWrite.RemoteAddr())
+					connWrite.Close()
+					return
+				}
+
+				if err.Error() == "EOF" {
+					failedDecodingMsg++
+				}
+
 				continue
 			}
 
 			// Save receive time.
 			recvTime := time.Now().UnixNano()
 
+			// Reset decoding error counter.
+			failedDecodingMsg = 0
+
+			cl.muNewMsg.Lock()
+
 			// Do not consider cover traffic messages.
 			if !bytes.Equal(msg[0:28], []byte("COVER MESSAGE PLEASE DISCARD")) {
 
 				// Check dedup map for previous encounter.
-				_, seenBefore := recvdMsgs[string(msg[:31])]
+				_, seenBefore := cl.RecvdMsgs[string(msg[:31])]
 				if !seenBefore {
 
 					// Update message tracker.
-					recvdMsgs[string(msg[:31])] = true
+					cl.RecvdMsgs[string(msg[:31])] = true
 
 					// Print received message.
 					fmt.Printf("@%s> %s\n", msg[26:31], msg[31:])
@@ -426,22 +427,60 @@ func (cl *Client) RunRounds() {
 
 			// When we hit the number of messages set to
 			// receive, decrease shutdown grace period counter.
-			if len(recvdMsgs) >= cl.NumMsgToRecv {
-				clientDoneCounter--
+			if len(cl.RecvdMsgs) >= cl.NumMsgToRecv {
+				cl.DoneCounter--
 			}
 
 			// As soon as the grace period counter has reached
 			// zero, send out metrics stop signal and exit.
-			if clientDoneCounter == 0 {
+			if cl.DoneCounter == 0 {
 
 				if cl.IsEval {
 					fmt.Fprintf(cl.MetricsPipe, "done\n")
 				}
 
-				fmt.Printf("Number of messages to receive reached (want: %d, saw: %d), exiting.\n", cl.NumMsgToRecv, len(recvdMsgs))
+				fmt.Printf("Number of messages to receive reached (want: %d, saw: %d), exiting.\n", cl.NumMsgToRecv, len(cl.RecvdMsgs))
+				cl.muNewMsg.Unlock()
+
 				time.Sleep(2 * time.Second)
 				os.Exit(0)
 			}
+
+			cl.muNewMsg.Unlock()
+		}
+	}
+}
+
+// RunRounds executes all relevant components
+// of regular mix-net rounds on a client node
+// during one epoch's time.
+func (cl *Client) RunRounds() {
+
+	// Handle messaging loop.
+	go cl.SendMsg()
+
+	for {
+
+		select {
+		case <-cl.SigCloseEpoch:
+
+			fmt.Printf("\nSIG @ CLIENT RECV! Closing epoch\n")
+
+			// In case the current epoch is wrapping
+			// up, return from this function to stop
+			// listening for client messages.
+			return
+
+		default:
+
+			// Wait for incoming connection on public socket.
+			connWrite, err := cl.PubListener.Accept()
+			if err != nil {
+				fmt.Printf("Accepting connection from an exit mix failed: %v\n", err)
+				continue
+			}
+
+			go cl.HandleExitMixConn(connWrite)
 		}
 	}
 }

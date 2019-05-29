@@ -103,9 +103,12 @@ type Node struct {
 // our system architecture.
 type Client struct {
 	*Node
+	NumMsgToRecv int
 	muUpdState   *sync.RWMutex
 	IsClient     bool
-	NumMsgToRecv int
+	muNewMsg     *sync.Mutex
+	RecvdMsgs    map[string]bool
+	DoneCounter  int
 }
 
 // Mix represents a mix node in our
