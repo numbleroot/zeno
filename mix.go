@@ -517,7 +517,6 @@ func (mix *Mix) RotateRoundState() {
 			// Acquire lock on first pool.
 			mix.muAddMsgs.Lock()
 
-			evalCompleted := false
 			if mix.IsEval {
 
 				// If we are conducting an evaluation,
@@ -542,7 +541,26 @@ func (mix *Mix) RotateRoundState() {
 					// that we are done sending metrics.
 					fmt.Printf("Entry mix detected no further client messages, completing metrics collection.\n")
 					fmt.Fprintf(mix.MetricsPipe, "done\n")
-					evalCompleted = true
+
+					// Prepare message batch of size one with the
+					// sole purpose of telling downstream mixes
+					// to complete their evaluation and exit.
+					protoMsg, err := mix.CreateEvalDoneBatch()
+					if err != nil {
+						fmt.Printf("Preparing evaluation done batch failed: %v\n", err)
+						os.Exit(1)
+					}
+
+					// Encode message and send it via stream.
+					err = capnp.NewEncoder(mix.Successor).Encode(protoMsg)
+					if err != nil {
+						fmt.Printf("Failed sending evaluation done batch to downstream mix: %v\n", err)
+					} else {
+						fmt.Printf("Entry mix signaled downstream mix to stop evaluating.\n")
+					}
+
+					fmt.Printf("Entry mix has detected end of evaluation. Exiting.\n")
+					os.Exit(0)
 				}
 			}
 
@@ -668,46 +686,29 @@ func (mix *Mix) RotateRoundState() {
 
 			} else {
 
-				var protoMsg *capnp.Message
-				var protoMsgSeg *capnp.Segment
+				// Create new empty Cap'n Proto message.
+				protoMsg, protoMsgSeg, err := capnp.NewMessage(capnp.SingleSegment(nil))
+				if err != nil {
+					fmt.Printf("Rotating round state failed: %v\n", err)
+					os.Exit(1)
+				}
 
-				if mix.IsEval && evalCompleted {
+				// Create new empty batch message.
+				batch, err := rpc.NewRootBatch(protoMsgSeg)
+				if err != nil {
+					fmt.Printf("Rotating round state failed: %v\n", err)
+					os.Exit(1)
+				}
 
-					// Prepare message batch of size one with the
-					// sole purpose of telling downstream mixes
-					// to complete their evaluation and exit.
-					protoMsg, err = mix.CreateEvalDoneBatch()
-					if err != nil {
-						fmt.Printf("Preparing evaluation done batch failed: %v\n", err)
-						os.Exit(1)
-					}
+				// Prepare a list of messages of fitting size.
+				msgs, err := batch.NewMsgs(int32(len(mix.OutPool)))
+				if err != nil {
+					fmt.Printf("Rotating round state failed: %v\n", err)
+					os.Exit(1)
+				}
 
-				} else {
-
-					// Create new empty Cap'n Proto message.
-					protoMsg, protoMsgSeg, err = capnp.NewMessage(capnp.SingleSegment(nil))
-					if err != nil {
-						fmt.Printf("Rotating round state failed: %v\n", err)
-						os.Exit(1)
-					}
-
-					// Create new empty batch message.
-					batch, err := rpc.NewRootBatch(protoMsgSeg)
-					if err != nil {
-						fmt.Printf("Rotating round state failed: %v\n", err)
-						os.Exit(1)
-					}
-
-					// Prepare a list of messages of fitting size.
-					msgs, err := batch.NewMsgs(int32(len(mix.OutPool)))
-					if err != nil {
-						fmt.Printf("Rotating round state failed: %v\n", err)
-						os.Exit(1)
-					}
-
-					for i := range mix.OutPool {
-						msgs.Set(i, *mix.OutPool[i])
-					}
+				for i := range mix.OutPool {
+					msgs.Set(i, *mix.OutPool[i])
 				}
 
 				// Encode message and send it via stream.
@@ -728,11 +729,6 @@ func (mix *Mix) RotateRoundState() {
 			if err != nil {
 				fmt.Printf("Rotating round state failed: %v\n", err)
 				os.Exit(1)
-			}
-
-			if mix.IsEval && evalCompleted {
-				fmt.Printf("Entry mix has detected end of evaluation and sent all signals. Exiting.\n")
-				os.Exit(0)
 			}
 		}
 	}
