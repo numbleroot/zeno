@@ -976,9 +976,11 @@ func (mix *Mix) RunRounds() {
 	// Determine this mix node's place in cascades matrix.
 	mix.SetOwnPlace()
 
-	// Connect to all known clients.
 	if mix.IsExit {
+
+		// Connect to all known clients.
 		mix.ReconnectToClients()
+
 	} else {
 
 		// Connect to each mix node's successor mix.

@@ -151,8 +151,8 @@ func (node *Node) ElectMixes(data []string) error {
 		return fmt.Errorf("received candidates set of unexpected length, saw: %d, expected: %d", len(cands), (NumCascades * LenCascade))
 	}
 
-	// Sort candidates deterministically by
-	// their public key address.
+	// Sort candidates deterministically
+	// by their address.
 	sort.Slice(cands, func(i, j int) bool {
 		return cands[i].Addr < cands[j].Addr
 	})

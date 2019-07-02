@@ -19,11 +19,9 @@ import (
 	capnp "zombiezen.com/go/capnproto2"
 )
 
-// InitNewRound on clients takes care of
-// rotating the current round state to be
-// the previous one and bootstraps key
-// material and auxiliary data for the new
-// current one.
+// InitNewRound on clients bootstraps key
+// material and auxiliary data to be used
+// in the upcoming round.
 func InitNewRound(cascadesMatrix [][]*FlatEndpoint) ([][]*OnionKeyState, error) {
 
 	// Initialize new current round state.
