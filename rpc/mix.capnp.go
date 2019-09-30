@@ -8,6 +8,104 @@ import (
 	schemas "zombiezen.com/go/capnproto2/schemas"
 )
 
+type EntryConvoMsg struct{ capnp.Struct }
+
+// EntryConvoMsg_TypeID is the unique identifier for the type EntryConvoMsg.
+const EntryConvoMsg_TypeID = 0x902882978134d105
+
+func NewEntryConvoMsg(s *capnp.Segment) (EntryConvoMsg, error) {
+	st, err := capnp.NewStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 3})
+	return EntryConvoMsg{st}, err
+}
+
+func NewRootEntryConvoMsg(s *capnp.Segment) (EntryConvoMsg, error) {
+	st, err := capnp.NewRootStruct(s, capnp.ObjectSize{DataSize: 0, PointerCount: 3})
+	return EntryConvoMsg{st}, err
+}
+
+func ReadRootEntryConvoMsg(msg *capnp.Message) (EntryConvoMsg, error) {
+	root, err := msg.RootPtr()
+	return EntryConvoMsg{root.Struct()}, err
+}
+
+func (s EntryConvoMsg) String() string {
+	str, _ := text.Marshal(0x902882978134d105, s.Struct)
+	return str
+}
+
+func (s EntryConvoMsg) Sender() (string, error) {
+	p, err := s.Struct.Ptr(0)
+	return p.Text(), err
+}
+
+func (s EntryConvoMsg) HasSender() bool {
+	p, err := s.Struct.Ptr(0)
+	return p.IsValid() || err != nil
+}
+
+func (s EntryConvoMsg) SenderBytes() ([]byte, error) {
+	p, err := s.Struct.Ptr(0)
+	return p.TextBytes(), err
+}
+
+func (s EntryConvoMsg) SetSender(v string) error {
+	return s.Struct.SetText(0, v)
+}
+
+func (s EntryConvoMsg) PubKeyOrAddr() ([]byte, error) {
+	p, err := s.Struct.Ptr(1)
+	return []byte(p.Data()), err
+}
+
+func (s EntryConvoMsg) HasPubKeyOrAddr() bool {
+	p, err := s.Struct.Ptr(1)
+	return p.IsValid() || err != nil
+}
+
+func (s EntryConvoMsg) SetPubKeyOrAddr(v []byte) error {
+	return s.Struct.SetData(1, v)
+}
+
+func (s EntryConvoMsg) Content() ([]byte, error) {
+	p, err := s.Struct.Ptr(2)
+	return []byte(p.Data()), err
+}
+
+func (s EntryConvoMsg) HasContent() bool {
+	p, err := s.Struct.Ptr(2)
+	return p.IsValid() || err != nil
+}
+
+func (s EntryConvoMsg) SetContent(v []byte) error {
+	return s.Struct.SetData(2, v)
+}
+
+// EntryConvoMsg_List is a list of EntryConvoMsg.
+type EntryConvoMsg_List struct{ capnp.List }
+
+// NewEntryConvoMsg creates a new list of EntryConvoMsg.
+func NewEntryConvoMsg_List(s *capnp.Segment, sz int32) (EntryConvoMsg_List, error) {
+	l, err := capnp.NewCompositeList(s, capnp.ObjectSize{DataSize: 0, PointerCount: 3}, sz)
+	return EntryConvoMsg_List{l}, err
+}
+
+func (s EntryConvoMsg_List) At(i int) EntryConvoMsg { return EntryConvoMsg{s.List.Struct(i)} }
+
+func (s EntryConvoMsg_List) Set(i int, v EntryConvoMsg) error { return s.List.SetStruct(i, v.Struct) }
+
+func (s EntryConvoMsg_List) String() string {
+	str, _ := text.MarshalList(0x902882978134d105, s.List)
+	return str
+}
+
+// EntryConvoMsg_Promise is a wrapper for a EntryConvoMsg promised by a client call.
+type EntryConvoMsg_Promise struct{ *capnp.Pipeline }
+
+func (p EntryConvoMsg_Promise) Struct() (EntryConvoMsg, error) {
+	s, err := p.Pipeline.Struct()
+	return EntryConvoMsg{s}, err
+}
+
 type ConvoMsg struct{ capnp.Struct }
 
 // ConvoMsg_TypeID is the unique identifier for the type ConvoMsg.
@@ -163,25 +261,32 @@ func (p Batch_Promise) Struct() (Batch, error) {
 	return Batch{s}, err
 }
 
-const schema_a1ac1f9011521afa = "x\xda\x12hr`2d\x15gb`\x08\x94`e" +
-	"\xfb\xbfv\x82\xdd\xf3\xbcy_\x973\x08\xf21\xfe\xff" +
-	"%\x15$8A~\xcdB\x06VFv\x06\x06\xc1\x8f" +
-	"\x8b\x04\x7f\x82\xe8\xaf\xf6\x0c\x8c\xff\xf3\x12\xea\xc2\xaf\xaa" +
-	"\xfe~\x82\xa6\x90\x89\x9d\x81AX\x95q\x97\xb0.H" +
-	"\x8b\xb0&c9\x83\xee\xff\xa2\x82d\xfd\xdc\xcc\x0a=" +
-	"\xc6\xe4\xc4\x82\xbc\x02+\xa7D\xf6\x92\xe4\x8c\x00F\xc6" +
-	"@\x16f\x16\x06\x06\x16F\x06\x06A^-\x06\x86@" +
-	"\x0ef\xc6@\x15&F\xfe\xdc\xe2\xf4bF>\x06\xc6" +
-	"\x00fFF\x01\x84M\x0c\x8c At\xd3\x9c\xf3\xed" +
-	"\xf3\xca\xf2}\x8b\xd3A\x06r\xc0\x0d\xd4\xccb`\x08" +
-	"\xd4`f\x0c4ab\x14dd\x14a\x04\x09\x1a:" +
-	"10\x04\xea03\x06Z01\xfe/(M\xf2N" +
-	"\xad\xf4/b\xe0wLI)b\xe4e`b\xe4e" +
-	"`\xacO\xce\xcf+I\xcd+\x81\xf1\x01\x01\x00\x00\xff" +
-	"\xffS\xa2Ed"
+const schema_a1ac1f9011521afa = "x\xda\x8c\x90\xbfJ+A\x14\x87\xcfo&{\x93\"" +
+	"\xff\x96Mu\xb9\x17\x1b\x03\x89\xf8\x87@\x0aIab" +
+	"B@1bF\x04-\x8d\x9b%*dv\xd9]\xa3" +
+	"i\x14}\x82tv\x8266\x8a\xbd]\x0a\x0bK\x0b" +
+	"_@\x04\x9f \x85\x8a\xacl\xd4(\xa9\xec\xce\x1c>" +
+	"\x0e\xdf7\xf1n\x81e\x14\x93\x11\x89\x7f\xca\x1fO\xb9" +
+	"\xcb\x1e\x1e\x1f\xa5:\xa4F\xe1\xbd\xfc]V;#\x17" +
+	"\xa7\xa4\xf0 \x91\xf6\x1f\x0fZ\x1a\xfe\x94\xc4\x15\xc1\xbb" +
+	"\xec\xcc<\xc9\x93\xde\xf9\x10\xdb'\xba8\xd3n\xfb\xd3" +
+	"\x0d\xf2\x04O\xae\xef\xaf\xde'_\x1f\x87X\xe6\x13=" +
+	"\\ko}\xf6\x19\xbb4\xe1\xd9\x96>\xd5\xdc\xda\x9b" +
+	"dz\xcd\x92V\xae,]\xbb]2e\xcb\x0c.:" +
+	"\x8d* \xc2<@\x14\x00\x91Z\xce\x11\x89\x02\x87\xa8" +
+	"0\xa8@\x02\xfer~\x9bH\xccq\x88\x15\x06\x95\xb1" +
+	"\x04\x18\x91*\x8aD\xa2\xc2!\xd6\x18\xf2\x8e!\xeb\x86" +
+	"\x8d01\x84\x09\x9e\xb5\xb3\xb1`\xb4\x97l\x8a\xcd\xd6" +
+	"\xeb6\"\xc4\x10!\x1c\xe8\xa6t\x0d\xe9~\xbd\x07^" +
+	"\xf8\xf0*\xd6\x82\xae\xbe\xe9\xfb\x04\x06>\x911\"\x11" +
+	"\xe2\x10\xa3\x0c\xb1\xa6\xd3p\x10%T9\x10\xff\xfe\x01" +
+	"\x82\xbf\x1c\xbeV2\xf3\xb2e~\x06\x86\x06\x07\xd3~" +
+	"K\x8aCd\x7f\x04f\xfc\x96q\x0e1\xcd~+\xff" +
+	"\x1e\x00\x00\xff\xff\x0b\x8dq\xc4"
 
 func init() {
 	schemas.Register(schema_a1ac1f9011521afa,
+		0x902882978134d105,
 		0xa7f59e6ee73e90ad,
 		0xe4fb25d5577e606e)
 }

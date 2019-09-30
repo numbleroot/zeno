@@ -736,7 +736,7 @@ func (mix *Mix) RotateRoundState() {
 
 // AddConvoMsg enables a client to deliver
 // a conversation message to an entry mix.
-func (mix *Mix) AddConvoMsg(connWrite net.Conn, sender string) {
+func (mix *Mix) AddConvoMsg(connWrite net.Conn) {
 
 	// Decode message from stream.
 	encConvoMsgWire, err := capnp.NewDecoder(connWrite).Decode()
@@ -747,9 +747,20 @@ func (mix *Mix) AddConvoMsg(connWrite net.Conn, sender string) {
 	}
 
 	// Extract contained encrypted conversation message.
-	encConvoMsgRaw, err := rpc.ReadRootConvoMsg(encConvoMsgWire)
+	encEntryConvoMsgRaw, err := rpc.ReadRootEntryConvoMsg(encConvoMsgWire)
 	if err != nil {
-		fmt.Printf("Failed reading root conversation message from client message: %v\n", err)
+		fmt.Printf("Failed reading root entry conversation message from client message: %v\n", err)
+		fmt.Fprintf(connWrite, "1\n")
+		return
+	}
+
+	// Extract sender from message. Solely used
+	// for rate limiting at entry mix.
+	// TODO: Might be inappropriate to use name
+	//       of client as identifier.
+	sender, err := encEntryConvoMsgRaw.Sender()
+	if err != nil {
+		fmt.Printf("Failed to extract sender from entry conversation message: %v\n", err)
 		fmt.Fprintf(connWrite, "1\n")
 		return
 	}
@@ -757,9 +768,9 @@ func (mix *Mix) AddConvoMsg(connWrite net.Conn, sender string) {
 	// Extract public key used during encryption
 	// of onionized message from convo message.
 	pubKey := new([32]byte)
-	pubKeyRaw, err := encConvoMsgRaw.PubKeyOrAddr()
+	pubKeyRaw, err := encEntryConvoMsgRaw.PubKeyOrAddr()
 	if err != nil {
-		fmt.Printf("Failed to extract public key from conversation message: %v\n", err)
+		fmt.Printf("Failed to extract public key from entry conversation message: %v\n", err)
 		fmt.Fprintf(connWrite, "1\n")
 		return
 	}
@@ -767,9 +778,9 @@ func (mix *Mix) AddConvoMsg(connWrite net.Conn, sender string) {
 
 	// Extract forward message from
 	// received convo message.
-	encConvoMsg, err := encConvoMsgRaw.Content()
+	encConvoMsg, err := encEntryConvoMsgRaw.Content()
 	if err != nil {
-		fmt.Printf("Failed to extract content from conversation message: %v\n", err)
+		fmt.Printf("Failed to extract content from entry conversation message: %v\n", err)
 		fmt.Fprintf(connWrite, "1\n")
 		return
 	}
@@ -1035,12 +1046,10 @@ func (mix *Mix) RunRounds() {
 					continue
 				}
 
-				sender := strings.Split(connWrite.RemoteAddr().String(), ":")[0]
-
 				// At entry mixes we only receive single
 				// conversation messages from clients.
 				// We handle them directly.
-				go mix.AddConvoMsg(connWrite, sender)
+				go mix.AddConvoMsg(connWrite)
 			}
 		}
 	} else {

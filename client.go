@@ -66,7 +66,7 @@ func InitNewRound(cascadesMatrix [][]*FlatEndpoint) ([][]*OnionKeyState, error) 
 // A client uses this function to reverse-encrypt
 // a message for the assigned chain and send it off
 // to each respective entry mix.
-func OnionEncryptAndSend(retChan chan *ClientSendResult, text []byte, recipient string, chain []*FlatEndpoint, keyState []*OnionKeyState) {
+func OnionEncryptAndSend(retChan chan *ClientSendResult, sender string, text []byte, recipient string, chain []*FlatEndpoint, keyState []*OnionKeyState) {
 
 	// Pad recipient to fixed length.
 	recipientPadded := make([]byte, 32)
@@ -163,15 +163,22 @@ func OnionEncryptAndSend(retChan chan *ClientSendResult, text []byte, recipient 
 		return
 	}
 
-	// Create new ConvoMsg and insert values.
-	onionMsg, err := rpc.NewRootConvoMsg(protoMsgSeg)
+	// Create new EntryConvoMsg and insert values.
+	onionMsg, err := rpc.NewRootEntryConvoMsg(protoMsgSeg)
 	if err != nil {
-		fmt.Printf("Failed creating new root ConvoMsg: %v\n", err)
+		fmt.Printf("Failed creating new root EntryConvoMsg: %v\n", err)
 		retChan <- &ClientSendResult{Status: 1, Time: -1}
 		return
 	}
 	onionMsg.SetPubKeyOrAddr(keyState[0].PubKey[:])
 	onionMsg.SetContent(encMsg)
+
+	// Set sender of message to this client's
+	// name in order for the entry mix to ensure
+	// constant-bandwidth traffic.
+	// TODO: Might be inappropriate to use name
+	//       of client as identifier.
+	onionMsg.SetSender(sender)
 
 	// Connect to this cascade's entry mix.
 	connWrite, err := tls.DialWithDialer(&net.Dialer{
@@ -295,7 +302,7 @@ func (cl *Client) SendMsg() {
 		// In parallel, reverse onion-encrypt the
 		// message and send to all entry mixes.
 		for chain := range cascadesMatrix {
-			go OnionEncryptAndSend(retChan, msg, cl.Partner.Addr, cascadesMatrix[chain], keyState[chain])
+			go OnionEncryptAndSend(retChan, cl.Name, msg, cl.Partner.Addr, cascadesMatrix[chain], keyState[chain])
 		}
 
 		succeeded := false
