@@ -741,7 +741,7 @@ func (mix *Mix) AddConvoMsg(connWrite net.Conn) {
 	// Decode message from stream.
 	encConvoMsgWire, err := capnp.NewDecoder(connWrite).Decode()
 	if err != nil {
-		fmt.Printf("Error decoding message from client: %v\n", err)
+		fmt.Printf("Error decoding message from one of the clients at %s: %v\n", connWrite.RemoteAddr().String(), err)
 		fmt.Fprintf(connWrite, "1\n")
 		return
 	}
@@ -749,7 +749,7 @@ func (mix *Mix) AddConvoMsg(connWrite net.Conn) {
 	// Extract contained encrypted conversation message.
 	encEntryConvoMsgRaw, err := rpc.ReadRootEntryConvoMsg(encConvoMsgWire)
 	if err != nil {
-		fmt.Printf("Failed reading root entry conversation message from client message: %v\n", err)
+		fmt.Printf("Failed reading root entry conversation message of client message from %s: %v\n", connWrite.RemoteAddr().String(), err)
 		fmt.Fprintf(connWrite, "1\n")
 		return
 	}
@@ -760,7 +760,7 @@ func (mix *Mix) AddConvoMsg(connWrite net.Conn) {
 	//       of client as identifier.
 	sender, err := encEntryConvoMsgRaw.Sender()
 	if err != nil {
-		fmt.Printf("Failed to extract sender from entry conversation message: %v\n", err)
+		fmt.Printf("Failed to extract sender of entry conversation message from %s: %v\n", connWrite.RemoteAddr().String(), err)
 		fmt.Fprintf(connWrite, "1\n")
 		return
 	}
@@ -770,7 +770,7 @@ func (mix *Mix) AddConvoMsg(connWrite net.Conn) {
 	pubKey := new([32]byte)
 	pubKeyRaw, err := encEntryConvoMsgRaw.PubKeyOrAddr()
 	if err != nil {
-		fmt.Printf("Failed to extract public key from entry conversation message: %v\n", err)
+		fmt.Printf("Failed to extract public key of entry conversation message from %s: %v\n", sender, err)
 		fmt.Fprintf(connWrite, "1\n")
 		return
 	}
@@ -780,7 +780,7 @@ func (mix *Mix) AddConvoMsg(connWrite net.Conn) {
 	// received convo message.
 	encConvoMsg, err := encEntryConvoMsgRaw.Content()
 	if err != nil {
-		fmt.Printf("Failed to extract content from entry conversation message: %v\n", err)
+		fmt.Printf("Failed to extract content of entry conversation message from %s: %v\n", sender, err)
 		fmt.Fprintf(connWrite, "1\n")
 		return
 	}

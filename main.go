@@ -260,7 +260,7 @@ func main() {
 			}
 
 			client.RecvdMsgs = make(map[string]bool)
-			client.DoneCounter = 300
+			client.DoneCounter = 150
 
 			client.muUpdState.Unlock()
 			client.muNewMsg.Unlock()
