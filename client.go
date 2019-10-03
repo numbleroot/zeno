@@ -346,7 +346,8 @@ func (cl *Client) SendMsg() {
 				// In case we are evaluating this client, send
 				// the measurement line to collector sidecar.
 				if cl.IsEval {
-					fmt.Fprintf(cl.MetricsPipe, "send;%d %s %s\n", retState.Time, msg[:26], msg[26:31])
+					fmt.Fprintf(cl.MetricsPipe, "send;%s %s\n", msg[:26], msg[26:31])
+					fmt.Fprintf(cl.MetricsPipe, "send;%d\n", retState.Time)
 				}
 			}
 		}
