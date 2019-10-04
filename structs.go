@@ -120,7 +120,9 @@ type Mix struct {
 	IsEntry          bool
 	IsExit           bool
 	Successor        *tls.Conn
+	PredecessorIP    string
 	RoundTicker      *time.Ticker
+	SigBatchAppended chan struct{}
 	muAddMsgs        *sync.Mutex
 	ClientsSeen      map[string]bool
 	FirstPool        []*rpc.ConvoMsg

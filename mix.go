@@ -53,7 +53,13 @@ func (mix *Mix) SetOwnPlace() {
 		}
 	}
 
-	fmt.Printf("%s@%s:  OwnChain=%v, OwnIndex=%v, IsEntry=%v, IsExit=%v\n", mix.Name, mix.PubLisAddr, mix.OwnChain, mix.OwnIndex, mix.IsEntry, mix.IsExit)
+	// Set predecessor IP address.
+	if !mix.IsEntry {
+		mix.PredecessorIP = strings.Split(mix.CurCascadesMatrix[mix.OwnChain][(mix.OwnIndex-1)].Addr, ":")[0]
+	}
+
+	fmt.Printf("%s@%s:  OwnChain=%v, OwnIndex=%v, IsEntry=%v, IsExit=%v, PredecessorIP=%v\n",
+		mix.Name, mix.PubLisAddr, mix.OwnChain, mix.OwnIndex, mix.IsEntry, mix.IsExit, mix.PredecessorIP)
 }
 
 // ReconnectToSuccessor establishes a connection
@@ -413,8 +419,17 @@ func (mix *Mix) InitNewRound() error {
 		return err
 	}
 
-	// Start timer.
+	// Prepare empty signal channel for when
+	// a non-entry mix appended a message batch.
+	mix.SigBatchAppended = make(chan struct{})
+
+	// Only the entry mix is supposed to enforce
+	// the round time. Start a ticker for it, stop
+	// it on all other nodes again.
 	mix.RoundTicker = time.NewTicker(RoundTime)
+	if !mix.IsEntry {
+		mix.RoundTicker.Stop()
+	}
 
 	return nil
 }
@@ -481,59 +496,60 @@ func (mix *Mix) RotateRoundState() {
 		select {
 		case <-mix.SigCloseEpoch:
 
-			fmt.Printf("\nSIG @ ROTATE! Closing epoch\n")
+			fmt.Printf("\nCLOSE SIG @ ROTATE! Closing epoch\n")
 
 			// In case the current epoch is wrapping
 			// up, return from this function to stop
 			// rotating rounds.
 			return
 
-		default:
+		case <-mix.RoundTicker.C:
 
-			<-mix.RoundTicker.C
+		case <-mix.SigBatchAppended:
 
-			// Move round counter to next round.
-			mix.RoundCounter++
-			if (mix.KillMixesInRound != -1) && (mix.RoundCounter >= mix.KillMixesInRound) &&
-				(mix.OwnChain > 0) && (mix.OwnIndex == 1) {
+		}
 
-				// Crash second-in-cascade mixes in all but first cascade
-				// when configured round to crash was reached.
-				fmt.Printf("This is a second-in-cascade mix in a non-first cascade - exiting!\n")
-				os.Exit(0)
-			}
+		// Move round counter to next round.
+		mix.RoundCounter++
+		if (mix.KillMixesInRound != -1) && (mix.RoundCounter >= mix.KillMixesInRound) &&
+			(mix.OwnChain > 0) && (mix.OwnIndex == 1) {
 
-			numClients := len(mix.CurClients)
-			numSamples := numClients / 100
-			if numSamples < 100 {
-				numSamples = numClients
-			}
-			maxNumMsg := numClients + numSamples + 10
+			// Crash second-in-cascade mixes in all but first cascade
+			// when configured round to crash was reached.
+			fmt.Printf("This is a second-in-cascade mix in a non-first cascade - exiting!\n")
+			os.Exit(0)
+		}
 
-			// Use channel later to communicate end
-			// of cover traffic generation in background.
-			coverGenErrChan := make(chan error)
+		numClients := len(mix.CurClients)
+		numSamples := numClients / 100
+		if numSamples < 100 {
+			numSamples = numClients
+		}
+		maxNumMsg := numClients + numSamples + 10
 
-			// Acquire lock on first pool.
-			mix.muAddMsgs.Lock()
+		// Use channel later to communicate end
+		// of cover traffic generation in background.
+		coverGenErrChan := make(chan error)
 
-			if mix.IsEval {
+		// Acquire lock on first pool.
+		mix.muAddMsgs.Lock()
 
-				// If we are conducting an evaluation,
-				// send pool sizes to collector sidecar.
-				fmt.Fprintf(mix.MetricsPipe, "%d 1st:%d 2nd:%d 3rd:%d out:%d\n", mix.RoundCounter,
-					len(mix.FirstPool), len(mix.SecPool), len(mix.ThirdPool), len(mix.OutPool))
+		if mix.IsEval {
 
-				if mix.IsEntry && len(mix.ClientsSeen) < 10 {
+			// If we are conducting an evaluation,
+			// send pool sizes to collector sidecar.
+			fmt.Fprintf(mix.MetricsPipe, "%d 1st:%d 2nd:%d 3rd:%d out:%d\n", mix.RoundCounter,
+				len(mix.FirstPool), len(mix.SecPool), len(mix.ThirdPool), len(mix.OutPool))
 
-					fmt.Printf("len(ClientsSeen) = %d\n", len(mix.ClientsSeen))
-					for i := range mix.ClientsSeen {
-						fmt.Printf("\t%s => %v\n", i, mix.ClientsSeen[i])
-					}
-					fmt.Println()
+			if mix.IsEntry && (len(mix.ClientsSeen) < 10) {
+
+				fmt.Printf("len(ClientsSeen) = %d\n", len(mix.ClientsSeen))
+				for i := range mix.ClientsSeen {
+					fmt.Printf("\t%s => %v\n", i, mix.ClientsSeen[i])
 				}
+				fmt.Println()
 
-				if mix.IsEntry && (len(mix.ClientsSeen) == 0) {
+				if len(mix.ClientsSeen) == 0 {
 
 					// In case the clients have ceased sending due to
 					// having seen the amount of messages they were
@@ -563,173 +579,173 @@ func (mix *Mix) RotateRoundState() {
 					os.Exit(0)
 				}
 			}
+		}
 
-			// Reset participation tracking map.
-			mix.ClientsSeen = make(map[string]bool)
+		// Reset participation tracking map.
+		mix.ClientsSeen = make(map[string]bool)
 
-			// Rotate first to second, second to third,
-			// and third to outgoing message pool.
-			mix.OutPool = mix.ThirdPool
-			mix.ThirdPool = mix.SecPool
-			mix.SecPool = mix.FirstPool
+		// Rotate first to second, second to third,
+		// and third to outgoing message pool.
+		mix.OutPool = mix.ThirdPool
+		mix.ThirdPool = mix.SecPool
+		mix.SecPool = mix.FirstPool
 
-			// Rotate prepared background message pool
-			// prepopulated with cover messages to
-			// first slot.
-			mix.FirstPool = mix.NextPool
+		// Rotate prepared background message pool
+		// prepopulated with cover messages to
+		// first slot.
+		mix.FirstPool = mix.NextPool
 
-			// Unlock first pool so that the regular
-			// message handlers can continue to insert
-			// mix messages.
-			mix.muAddMsgs.Unlock()
+		// Unlock first pool so that the regular
+		// message handlers can continue to insert
+		// mix messages.
+		mix.muAddMsgs.Unlock()
 
-			go func(numClients int, numSamples int) {
+		go func(numClients int, numSamples int) {
 
-				// Create new empty slice for upcoming round.
-				mix.NextPool = make([]*rpc.ConvoMsg, 0, maxNumMsg)
+			// Create new empty slice for upcoming round.
+			mix.NextPool = make([]*rpc.ConvoMsg, 0, maxNumMsg)
 
-				// Add basis of cover traffic to background
-				// pool that will become the first pool next
-				// round rotation.
-				err := mix.AddCoverMsgsToPool(false, numClients, numSamples)
-				if err != nil {
-					coverGenErrChan <- err
-				}
-
-				coverGenErrChan <- nil
-
-			}(numClients, numSamples)
-
-			// Truly randomly permute messages in SecPool.
-			for i := (len(mix.SecPool) - 1); i > 0; i-- {
-
-				// Generate new CSPRNG number smaller than i.
-				jBig, err := rand.Int(rand.Reader, big.NewInt(int64(i)))
-				if err != nil {
-					fmt.Printf("Rotating round state failed: %v\n", err)
-					os.Exit(1)
-				}
-				j := int(jBig.Int64())
-
-				// Swap places i and j in second pool.
-				mix.SecPool[i], mix.SecPool[j] = mix.SecPool[j], mix.SecPool[i]
+			// Add basis of cover traffic to background
+			// pool that will become the first pool next
+			// round rotation.
+			err := mix.AddCoverMsgsToPool(false, numClients, numSamples)
+			if err != nil {
+				coverGenErrChan <- err
 			}
 
-			// Choose variance value randomly.
-			varianceBig, err := rand.Int(rand.Reader, big.NewInt(BatchSizeVariance))
+			coverGenErrChan <- nil
+
+		}(numClients, numSamples)
+
+		// Truly randomly permute messages in SecPool.
+		for i := (len(mix.SecPool) - 1); i > 0; i-- {
+
+			// Generate new CSPRNG number smaller than i.
+			jBig, err := rand.Int(rand.Reader, big.NewInt(int64(i)))
 			if err != nil {
 				fmt.Printf("Rotating round state failed: %v\n", err)
 				os.Exit(1)
 			}
-			variance := int(varianceBig.Int64())
+			j := int(jBig.Int64())
 
-			// Calculate appropriate pool indices. Start is set to half
-			// of the SecPool's length minus the randomly chosen variance
-			// value to introduce some randomness. End is set to include
-			// all elements from start until the end of the pool.
-			end := len(mix.SecPool)
-			start := (end / 2) - variance
-			if start < 0 {
-				start = 0
-			}
+			// Swap places i and j in second pool.
+			mix.SecPool[i], mix.SecPool[j] = mix.SecPool[j], mix.SecPool[i]
+		}
 
-			// Append last (end - start) messages from SecPool to OutPool.
-			mix.OutPool = append(mix.OutPool, mix.SecPool[start:end]...)
+		// Choose variance value randomly.
+		varianceBig, err := rand.Int(rand.Reader, big.NewInt(BatchSizeVariance))
+		if err != nil {
+			fmt.Printf("Rotating round state failed: %v\n", err)
+			os.Exit(1)
+		}
+		variance := int(varianceBig.Int64())
 
-			// Shrink size of SecPool by (end - start).
-			mix.SecPool = mix.SecPool[:start]
+		// Calculate appropriate pool indices. Start is set to half
+		// of the SecPool's length minus the randomly chosen variance
+		// value to introduce some randomness. End is set to include
+		// all elements from start until the end of the pool.
+		end := len(mix.SecPool)
+		start := (end / 2) - variance
+		if start < 0 {
+			start = 0
+		}
 
-			end = len(mix.ThirdPool)
-			start = (end / 2) - variance
-			if start < 0 {
-				start = 0
-			}
+		// Append last (end - start) messages from SecPool to OutPool.
+		mix.OutPool = append(mix.OutPool, mix.SecPool[start:end]...)
 
-			// Append last (end - start) messages from ThirdPool to OutPool.
-			mix.OutPool = append(mix.OutPool, mix.ThirdPool[start:end]...)
+		// Shrink size of SecPool by (end - start).
+		mix.SecPool = mix.SecPool[:start]
 
-			// Shrink size of ThirdPool by (end - start).
-			mix.ThirdPool = mix.ThirdPool[:start]
+		end = len(mix.ThirdPool)
+		start = (end / 2) - variance
+		if start < 0 {
+			start = 0
+		}
 
-			// Randomly permute OutPool once more to destroy any potential
-			// for linking the order in the outgoing message batch to a
-			// message's relationship to one of the pools.
-			for i := (len(mix.OutPool) - 1); i > 0; i-- {
+		// Append last (end - start) messages from ThirdPool to OutPool.
+		mix.OutPool = append(mix.OutPool, mix.ThirdPool[start:end]...)
 
-				// Generate new CSPRNG number smaller than i.
-				jBig, err := rand.Int(rand.Reader, big.NewInt(int64(i)))
-				if err != nil {
-					fmt.Printf("Rotating round state failed: %v\n", err)
-					os.Exit(1)
-				}
-				j := int(jBig.Int64())
+		// Shrink size of ThirdPool by (end - start).
+		mix.ThirdPool = mix.ThirdPool[:start]
 
-				// Swap places i and j in outgoing message pool.
-				mix.OutPool[i], mix.OutPool[j] = mix.OutPool[j], mix.OutPool[i]
-			}
+		// Randomly permute OutPool once more to destroy any potential
+		// for linking the order in the outgoing message batch to a
+		// message's relationship to one of the pools.
+		for i := (len(mix.OutPool) - 1); i > 0; i-- {
 
-			if mix.IsExit {
-
-				// Prepare parallel sending of outgoing
-				// messages to clients.
-				msgChan := make(chan *rpc.ConvoMsg, len(mix.OutPool))
-				for i := 0; i < len(mix.OutPool); i++ {
-					go mix.ForwardMsgToSender(msgChan)
-				}
-
-				// Hand over outgoing messages to goroutines
-				// performing the actual sending.
-				for i := range mix.OutPool {
-					msgChan <- mix.OutPool[i]
-				}
-				close(msgChan)
-
-			} else {
-
-				// Create new empty Cap'n Proto message.
-				protoMsg, protoMsgSeg, err := capnp.NewMessage(capnp.SingleSegment(nil))
-				if err != nil {
-					fmt.Printf("Rotating round state failed: %v\n", err)
-					os.Exit(1)
-				}
-
-				// Create new empty batch message.
-				batch, err := rpc.NewRootBatch(protoMsgSeg)
-				if err != nil {
-					fmt.Printf("Rotating round state failed: %v\n", err)
-					os.Exit(1)
-				}
-
-				// Prepare a list of messages of fitting size.
-				msgs, err := batch.NewMsgs(int32(len(mix.OutPool)))
-				if err != nil {
-					fmt.Printf("Rotating round state failed: %v\n", err)
-					os.Exit(1)
-				}
-
-				for i := range mix.OutPool {
-					msgs.Set(i, *mix.OutPool[i])
-				}
-
-				// Encode message and send it via stream.
-				err = capnp.NewEncoder(mix.Successor).Encode(protoMsg)
-				if err != nil {
-
-					if strings.Contains(err.Error(), "broken pipe") {
-						continue
-					}
-
-					fmt.Printf("Rotating round state failed: %v\n", err)
-					os.Exit(1)
-				}
-			}
-
-			// Wait for cover traffic generation to finish.
-			err = <-coverGenErrChan
+			// Generate new CSPRNG number smaller than i.
+			jBig, err := rand.Int(rand.Reader, big.NewInt(int64(i)))
 			if err != nil {
 				fmt.Printf("Rotating round state failed: %v\n", err)
 				os.Exit(1)
 			}
+			j := int(jBig.Int64())
+
+			// Swap places i and j in outgoing message pool.
+			mix.OutPool[i], mix.OutPool[j] = mix.OutPool[j], mix.OutPool[i]
+		}
+
+		if mix.IsExit {
+
+			// Prepare parallel sending of outgoing
+			// messages to clients.
+			msgChan := make(chan *rpc.ConvoMsg, len(mix.OutPool))
+			for i := 0; i < len(mix.OutPool); i++ {
+				go mix.ForwardMsgToSender(msgChan)
+			}
+
+			// Hand over outgoing messages to goroutines
+			// performing the actual sending.
+			for i := range mix.OutPool {
+				msgChan <- mix.OutPool[i]
+			}
+			close(msgChan)
+
+		} else {
+
+			// Create new empty Cap'n Proto message.
+			protoMsg, protoMsgSeg, err := capnp.NewMessage(capnp.SingleSegment(nil))
+			if err != nil {
+				fmt.Printf("Rotating round state failed: %v\n", err)
+				os.Exit(1)
+			}
+
+			// Create new empty batch message.
+			batch, err := rpc.NewRootBatch(protoMsgSeg)
+			if err != nil {
+				fmt.Printf("Rotating round state failed: %v\n", err)
+				os.Exit(1)
+			}
+
+			// Prepare a list of messages of fitting size.
+			msgs, err := batch.NewMsgs(int32(len(mix.OutPool)))
+			if err != nil {
+				fmt.Printf("Rotating round state failed: %v\n", err)
+				os.Exit(1)
+			}
+
+			for i := range mix.OutPool {
+				msgs.Set(i, *mix.OutPool[i])
+			}
+
+			// Encode message and send it via stream.
+			err = capnp.NewEncoder(mix.Successor).Encode(protoMsg)
+			if err != nil {
+
+				if strings.Contains(err.Error(), "broken pipe") {
+					continue
+				}
+
+				fmt.Printf("Rotating round state failed: %v\n", err)
+				os.Exit(1)
+			}
+		}
+
+		// Wait for cover traffic generation to finish.
+		err = <-coverGenErrChan
+		if err != nil {
+			fmt.Printf("Rotating round state failed: %v\n", err)
+			os.Exit(1)
 		}
 	}
 }
@@ -850,12 +866,12 @@ func (mix *Mix) AddConvoMsg(connWrite net.Conn) {
 // subsequent mix node.
 func (mix *Mix) HandleBatchMsgs(connWrite net.Conn, sender string) error {
 
-	if sender != strings.Split(mix.CurCascadesMatrix[mix.OwnChain][(mix.OwnIndex-1)].Addr, ":")[0] {
+	if sender != mix.PredecessorIP {
 
 		// Ensure only the predecessor mix is able to
 		// take up this mix node's compute resources.
-		return fmt.Errorf("node at %s tried to send a message batch but we expect predecessor %s", sender,
-			mix.CurCascadesMatrix[mix.OwnChain][(mix.OwnIndex-1)].Addr)
+		return fmt.Errorf("node at %s tried to send a message batch but we expect predecessor %s",
+			sender, mix.PredecessorIP)
 	}
 
 	for {
@@ -863,7 +879,7 @@ func (mix *Mix) HandleBatchMsgs(connWrite net.Conn, sender string) error {
 		select {
 		case <-mix.SigCloseEpoch:
 
-			fmt.Printf("\nSIG @ BATCH! Closing epoch\n")
+			fmt.Printf("\nCLOSE SIG @ BATCH! Closing epoch\n")
 
 			// In case the current epoch is wrapping
 			// up, return from this function to stop
@@ -975,6 +991,11 @@ func (mix *Mix) HandleBatchMsgs(connWrite net.Conn, sender string) error {
 				mix.FirstPool = append(mix.FirstPool, &convoMsg)
 				mix.muAddMsgs.Unlock()
 			}
+
+			// Signal round rotation routine that
+			// a new batch of messages is ready to
+			// be processed further.
+			mix.SigBatchAppended <- struct{}{}
 		}
 	}
 }
@@ -984,7 +1005,7 @@ func (mix *Mix) HandleBatchMsgs(connWrite net.Conn, sender string) error {
 // during one epoch's time.
 func (mix *Mix) RunRounds() {
 
-	// Determine this mix node's place in cascades matrix.
+	// Determine this mix' place in cascades matrix.
 	mix.SetOwnPlace()
 
 	if mix.IsExit {
@@ -1030,7 +1051,7 @@ func (mix *Mix) RunRounds() {
 			select {
 			case <-mix.SigCloseEpoch:
 
-				fmt.Printf("\nSIG @ ENTRY! Closing epoch\n")
+				fmt.Printf("\nCLOSE SIG @ ENTRY! Closing epoch\n")
 
 				// In case the current epoch is wrapping
 				// up, return from this function to stop
@@ -1052,6 +1073,7 @@ func (mix *Mix) RunRounds() {
 				go mix.AddConvoMsg(connWrite)
 			}
 		}
+
 	} else {
 
 		// Wait for incoming connections on public socket.

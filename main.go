@@ -183,6 +183,9 @@ func main() {
 			mix.IsEntry = false
 			mix.IsExit = false
 			mix.Successor = nil
+			mix.PredecessorIP = ""
+			mix.RoundTicker = nil
+			mix.SigBatchAppended = nil
 
 			// Open socket for incoming mix-net messages.
 			tried := 1
