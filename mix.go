@@ -195,17 +195,16 @@ func (mix *Mix) ForwardMsgToSender(msgChan chan *rpc.ConvoMsg) {
 }
 
 // AddCoverMsgsToPool ensures that a reasonable
-// (usually, #clients / 100) amount of generated
-// cover messages is prepopulated in the message
-// pool of each mix. We aim to thwart n - 1 attacks
-// by choosing forward batch messages uniformly
-// at random from that pool with the exception of
-// old messages.
-func (mix *Mix) AddCoverMsgsToPool(initFirst bool, numClients int, numSamples int) error {
+// amount of generated cover messages is prepopulated
+// in the message pool of each mix. We aim to thwart
+// n - 1 attacks by choosing forward batch messages
+// uniformly at random from that pool with the exception
+// of old messages.
+func (mix *Mix) AddCoverMsgsToPool(initFirst bool, numClients int, numCoverMsgs int) error {
 
-	// Randomly select k clients to generate
-	// cover messages to.
-	for i := 0; i < numSamples; i++ {
+	// Select numCoverMsgs clients uniformly at
+	// random to generate cover messages to.
+	for i := 0; i < numCoverMsgs; i++ {
 
 		// Select a user index uniformly at random.
 		chosenBig, err := rand.Int(rand.Reader, big.NewInt(int64(numClients)))
@@ -386,11 +385,8 @@ func (mix *Mix) AddCoverMsgsToPool(initFirst bool, numClients int, numSamples in
 func (mix *Mix) InitNewRound() error {
 
 	numClients := len(mix.CurClients)
-	numSamples := numClients / 100
-	if numSamples < 100 {
-		numSamples = numClients
-	}
-	maxNumMsg := numClients + numSamples + 10
+	numCoverMsgs := numClients
+	maxNumMsg := numClients + numCoverMsgs + 10
 
 	// Prepare map to keep track of the clients
 	// that have already participated in a round.
@@ -408,13 +404,13 @@ func (mix *Mix) InitNewRound() error {
 	mix.muAddMsgs = &sync.Mutex{}
 
 	// Add basis of cover traffic to first pool.
-	err := mix.AddCoverMsgsToPool(true, numClients, numSamples)
+	err := mix.AddCoverMsgsToPool(true, numClients, numCoverMsgs)
 	if err != nil {
 		return err
 	}
 
 	// Add basis of cover traffic to upcoming pool.
-	err = mix.AddCoverMsgsToPool(false, numClients, numSamples)
+	err = mix.AddCoverMsgsToPool(false, numClients, numCoverMsgs)
 	if err != nil {
 		return err
 	}
@@ -521,11 +517,8 @@ func (mix *Mix) RotateRoundState() {
 		}
 
 		numClients := len(mix.CurClients)
-		numSamples := numClients / 100
-		if numSamples < 100 {
-			numSamples = numClients
-		}
-		maxNumMsg := numClients + numSamples + 10
+		numCoverMsgs := numClients
+		maxNumMsg := numClients + numCoverMsgs + 10
 
 		// Use channel later to communicate end
 		// of cover traffic generation in background.
@@ -600,7 +593,7 @@ func (mix *Mix) RotateRoundState() {
 		// mix messages.
 		mix.muAddMsgs.Unlock()
 
-		go func(numClients int, numSamples int) {
+		go func(numClients int, numCoverMsgs int) {
 
 			// Create new empty slice for upcoming round.
 			mix.NextPool = make([]*rpc.ConvoMsg, 0, maxNumMsg)
@@ -608,14 +601,14 @@ func (mix *Mix) RotateRoundState() {
 			// Add basis of cover traffic to background
 			// pool that will become the first pool next
 			// round rotation.
-			err := mix.AddCoverMsgsToPool(false, numClients, numSamples)
+			err := mix.AddCoverMsgsToPool(false, numClients, numCoverMsgs)
 			if err != nil {
 				coverGenErrChan <- err
 			}
 
 			coverGenErrChan <- nil
 
-		}(numClients, numSamples)
+		}(numClients, numCoverMsgs)
 
 		// Truly randomly permute messages in SecPool.
 		for i := (len(mix.SecPool) - 1); i > 0; i-- {
