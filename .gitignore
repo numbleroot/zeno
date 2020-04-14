@@ -14,3 +14,7 @@
 # Project-specific.
 zeno
 *.log
+algorithms/algorithms.pdf
+algorithms/algorithms.tex
+algorithms/Makefile
+algorithms/metadata.template
